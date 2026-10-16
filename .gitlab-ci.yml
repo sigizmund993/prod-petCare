@@ -1,0 +1,79 @@
+# Нужные CI/CD Variables (Settings → CI/CD → Variables, masked):
+#   GHCR_USER   — логин на GitHub
+#   GHCR_TOKEN  — GitHub PAT (classic) со scope write:packages
+#   GHCR_OWNER  — владелец пакета (user или org на GitHub), в нижнем регистре
+#
+# Что и куда пушится:
+#   ветка develop      → target=dev  → :dev, :dev-<sha>
+#   дефолтная ветка    → target=prod → :latest, :<sha>
+#   git-тег (v1.2.3)   → target=prod → :v1.2.3
+
+stages:
+  - lint
+  - build
+
+variables:
+  IMAGE_NAME: petcate-backend
+  DOCKER_TLS_CERTDIR: "/certs"
+  DOCKER_BUILDKIT: "1"
+
+lint:
+  stage: lint
+  image: python:3.12-slim
+  script:
+    - pip install ruff
+    - ruff check .
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH
+    - if: $CI_COMMIT_TAG
+
+.docker_build:
+  stage: build
+  image: docker:27
+  services:
+    - docker:27-dind
+  before_script:
+    - export IMAGE="ghcr.io/${GHCR_OWNER}/${IMAGE_NAME}"
+    - echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+  script:
+    - docker pull "$IMAGE:$CACHE_TAG" || true
+    - TAG_ARGS=""; for t in $TAGS; do TAG_ARGS="$TAG_ARGS -t $IMAGE:$t"; done
+    - >
+      docker build
+      --target "$TARGET"
+      --cache-from "$IMAGE:$CACHE_TAG"
+      --build-arg BUILDKIT_INLINE_CACHE=1
+      --build-arg SOURCE_REPO="https://github.com/${GHCR_OWNER}/${IMAGE_NAME}"
+      $TAG_ARGS
+      .
+    - for t in $TAGS; do docker push "$IMAGE:$t"; done
+  after_script:
+    - docker logout ghcr.io || true
+
+build:dev:
+  extends: .docker_build
+  variables:
+    TARGET: dev
+    CACHE_TAG: dev
+    TAGS: "dev dev-$CI_COMMIT_SHORT_SHA"
+  rules:
+    - if: $CI_COMMIT_BRANCH == "develop"
+
+build:prod:
+  extends: .docker_build
+  variables:
+    TARGET: prod
+    CACHE_TAG: latest
+    TAGS: "latest $CI_COMMIT_SHORT_SHA"
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+build:release:
+  extends: .docker_build
+  variables:
+    TARGET: prod
+    CACHE_TAG: latest
+    TAGS: "$CI_COMMIT_TAG"
+  rules:
+    - if: $CI_COMMIT_TAG

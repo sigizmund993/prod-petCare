@@ -1,0 +1,11 @@
+services:
+  db:
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+
+  app:
+    build:
+      context: .
+      target: dev
+    volumes:
+      - .:/app
