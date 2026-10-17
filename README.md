@@ -8,6 +8,8 @@ src/      FastAPI приложение и хендлеры
 
 Запуск: `make run-dev` → http://localhost:8080/docs
 
+Архитектура и обоснование решений — [ARCHITECTURE.md](ARCHITECTURE.md), контракт API — [API.md](API.md).
+
 ## Тесты
 
 Интеграционные тесты в `tests/` ходят в API через HTTP и работают с настоящим Postgres: регистрация и подтверждение почты, питомцы, записи, уведомления, права доступа. Юнит-тесты покрывают хэширование паролей, JWT и отправку почты.
@@ -33,8 +35,8 @@ make test                        # pytest + отчёт покрытия в htmlc
 
 ## Деплой (Spirit GitLab)
 
-`push` в `master` → `build:image` (Kaniko, prod-стадия Dockerfile → Spirit Registry) → `setup:vm` (ставит `dp`) → `deploy:vm` (ssh + `docker compose` из `deploy/docker-compose.yml`).
-В merge request выполняется только `build:image`.
+`push` в `master` → `lint` и `test` → `build:image` (Kaniko, prod-стадия Dockerfile → Spirit Registry) → `setup:vm` (ставит `dp`) → `deploy:vm` (ssh + `docker compose` из `deploy/docker-compose.yml`).
+В merge request выполняются `lint`, `test` и `build:image`, без деплоя.
 
 CI-переменные (Spirit → Код → Репозитории → репозиторий → CI-переменные):
 
