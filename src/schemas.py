@@ -67,3 +67,7 @@ class PropIn(BaseModel):
 
 class Prop(PropIn):
     id: int
+
+
+class NotificationCount(BaseModel):
+    count: int
