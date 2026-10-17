@@ -13,7 +13,9 @@ from src.schemas import EmailCodeIn, EmailIn, LoginIn, Token, User, UserIn
 router = APIRouter(prefix="/user", tags=["user"])
 
 
-def email_taken():
+def already_taken(e: UniqueViolation):
+    if e.diag.constraint_name == "users_phone_number_key":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Phone number already registered")
     raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
 
 
@@ -36,8 +38,8 @@ def send_email_code(user_id: int, email: str, background_tasks: BackgroundTasks)
 def user_add(user: UserIn, background_tasks: BackgroundTasks):
     try:
         created = queries.create_user(user.email, user.phone_number, hash_password(user.passwd), user.name)
-    except UniqueViolation:
-        email_taken()
+    except UniqueViolation as e:
+        already_taken(e)
     send_email_code(created["id"], created["email"], background_tasks)
     return created
 
@@ -82,8 +84,8 @@ def user_me(user_id: int = Depends(current_user_id)):
 def user_edit(user: UserIn, background_tasks: BackgroundTasks, user_id: int = Depends(current_user_id)):
     try:
         updated = queries.update_user(user_id, user.email, user.phone_number, hash_password(user.passwd), user.name)
-    except UniqueViolation:
-        email_taken()
+    except UniqueViolation as e:
+        already_taken(e)
     if updated is None:
         not_found("User")
     if not updated["email_verified"]:

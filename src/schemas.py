@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 
 class UserIn(BaseModel):
@@ -8,6 +8,12 @@ class UserIn(BaseModel):
     phone_number: str | None = None
     passwd: str
     name: str
+
+    @field_validator("phone_number")
+    @classmethod
+    def empty_phone_is_none(cls, v: str | None) -> str | None:
+        # Пустой номер = номера нет, иначе пустые строки упрутся в уникальность
+        return (v.strip() or None) if v is not None else None
 
 
 class User(BaseModel):

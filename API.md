@@ -41,7 +41,7 @@ POST /user/add  ──►  на почту приходит 6-значный к�
 | 401 | нет токена, токен неверный или просрочен (без заголовка `Authorization` может прийти 403 `Not authenticated`) |
 | 403 | `Email not verified` при логине |
 | 404 | объект не найден **или чужой** (`User not found`, `Pet not found`, `Prop not found`) |
-| 409 | `Email already registered` |
+| 409 | `Email already registered` или `Phone number already registered` |
 | 422 | тело или параметры не прошли валидацию; `detail` в этом случае — массив с описанием полей |
 
 ## Модели
@@ -124,7 +124,7 @@ POST /user/add  ──►  на почту приходит 6-значный к�
   "phone_number": "+79990000000"
 }
 ```
-`phone_number` необязателен.
+`phone_number` необязателен и уникален: два пользователя не могут указать один номер. Пустая строка считается отсутствием номера (`null`).
 
 `Token`:
 ```json
