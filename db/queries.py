@@ -6,7 +6,7 @@ from db import db
 
 USER_COLUMNS = "id, email, phone_number, name, email_verified"
 PET_COLUMNS = "id, name, type, breed, birth_date, own_ids, prop_ids, picture IS NOT NULL AS has_picture"
-PROP_COLUMNS = "id, name, msg, text, rep, date, own_ids"
+PROP_COLUMNS = "id, name, msg, text, rep, date, own_ids, category, liked, suitable, reactions"
 
 
 # ---------- проверки ----------
@@ -181,12 +181,14 @@ def delete_pet(pet_id: int, user_id: int) -> bool:
 
 # ---------- props ----------
 
-def create_prop(user_id: int, name: str, msg: str | None, text: str | None, rep: bool, date: datetime, own_ids: list[int]) -> dict:
+def create_prop(user_id: int, name: str, msg: str | None, text: str | None, rep: bool, date: datetime, own_ids: list[int],
+                category: str, liked: bool | None, suitable: bool | None, reactions: list[str]) -> dict:
     with db.pool.connection() as conn:
         _check_refs(conn, user_id, own_ids)
         return conn.execute(
-            f"INSERT INTO props (name, msg, text, rep, date, own_ids) VALUES (%s, %s, %s, %s, %s, %s) RETURNING {PROP_COLUMNS}",
-            (name, msg, text, rep, date, own_ids),
+            "INSERT INTO props (name, msg, text, rep, date, own_ids, category, liked, suitable, reactions) "
+            f"VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING {PROP_COLUMNS}",
+            (name, msg, text, rep, date, own_ids, category, liked, suitable, reactions),
         ).fetchone()
 
 
@@ -197,14 +199,24 @@ def get_prop(prop_id: int, user_id: int) -> dict | None:
         ).fetchone()
 
 
-def list_props(user_id: int) -> list[dict]:
+# Необязательные фильтры списка записей: None — не фильтровать
+_PROP_FILTERS = (
+    "(%(category)s::text IS NULL OR category = %(category)s) "
+    "AND (%(liked)s::boolean IS NULL OR liked = %(liked)s) "
+    "AND (%(suitable)s::boolean IS NULL OR suitable = %(suitable)s)"
+)
+
+
+def list_props(user_id: int, category: str | None = None, liked: bool | None = None, suitable: bool | None = None) -> list[dict]:
     with db.pool.connection() as conn:
         return conn.execute(
-            f"SELECT {PROP_COLUMNS} FROM props WHERE %s = ANY(own_ids) ORDER BY date", (user_id,)
+            f"SELECT {PROP_COLUMNS} FROM props WHERE %(user_id)s = ANY(own_ids) AND {_PROP_FILTERS} ORDER BY date",
+            {"user_id": user_id, "category": category, "liked": liked, "suitable": suitable},
         ).fetchall()
 
 
-def list_props_by_pet(pet_id: int, user_id: int) -> list[dict] | None:
+def list_props_by_pet(pet_id: int, user_id: int, category: str | None = None, liked: bool | None = None,
+                      suitable: bool | None = None) -> list[dict] | None:
     # Владелец питомца видит все его записи; None — питомца нет или он чужой
     with db.pool.connection() as conn:
         pet = conn.execute(
@@ -213,16 +225,20 @@ def list_props_by_pet(pet_id: int, user_id: int) -> list[dict] | None:
         if pet is None:
             return None
         return conn.execute(
-            f"SELECT {PROP_COLUMNS} FROM props WHERE id = ANY(%s) ORDER BY date", (pet["prop_ids"],)
+            f"SELECT {PROP_COLUMNS} FROM props WHERE id = ANY(%(ids)s) AND {_PROP_FILTERS} ORDER BY date",
+            {"ids": pet["prop_ids"], "category": category, "liked": liked, "suitable": suitable},
         ).fetchall()
 
 
-def update_prop(prop_id: int, user_id: int, name: str, msg: str | None, text: str | None, rep: bool, date: datetime, own_ids: list[int]) -> dict | None:
+def update_prop(prop_id: int, user_id: int, name: str, msg: str | None, text: str | None, rep: bool, date: datetime, own_ids: list[int],
+                category: str, liked: bool | None, suitable: bool | None, reactions: list[str]) -> dict | None:
     with db.pool.connection() as conn:
         _check_refs(conn, user_id, own_ids)
         return conn.execute(
-            f"UPDATE props SET name = %s, msg = %s, text = %s, rep = %s, date = %s, own_ids = %s WHERE id = %s AND %s = ANY(own_ids) RETURNING {PROP_COLUMNS}",
-            (name, msg, text, rep, date, own_ids, prop_id, user_id),
+            "UPDATE props SET name = %s, msg = %s, text = %s, rep = %s, date = %s, own_ids = %s, "
+            "category = %s, liked = %s, suitable = %s, reactions = %s "
+            f"WHERE id = %s AND %s = ANY(own_ids) RETURNING {PROP_COLUMNS}",
+            (name, msg, text, rep, date, own_ids, category, liked, suitable, reactions, prop_id, user_id),
         ).fetchone()
 
 
@@ -247,10 +263,12 @@ _OCCURRENCE = (
 )
 
 _DUE_PROPS = f"""
-    SELECT p.id, p.name, p.msg, p.text, p.rep, {_OCCURRENCE} AS date, p.own_ids
+    SELECT p.id, p.name, p.msg, p.text, p.rep, {_OCCURRENCE} AS date, p.own_ids,
+           p.category, p.liked, p.suitable, p.reactions
     FROM props p
     LEFT JOIN notification_reads r ON r.prop_id = p.id AND r.user_id = %(user_id)s
-    WHERE %(user_id)s = ANY(p.own_ids) AND p.date <= now()
+    -- Записи о кормах — история питания, а не напоминания
+    WHERE %(user_id)s = ANY(p.own_ids) AND p.date <= now() AND p.category <> 'food'
       AND (r.read_date IS NULL OR r.read_date < {_OCCURRENCE})
 """
 

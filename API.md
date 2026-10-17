@@ -86,13 +86,33 @@ POST /user/add  ──►  на почту приходит 6-значный к�
   "text": null,
   "rep": false,
   "date": "2026-10-20T12:00:00Z",
-  "own_ids": [1]
+  "own_ids": [1],
+  "category": "vaccination",
+  "liked": null,
+  "suitable": null,
+  "reactions": []
 }
 ```
 - `msg`, `text` — необязательные строки (`null`).
 - `rep` — булево, по умолчанию `false`.
 - `date` — дата и время в ISO 8601, лучше передавать с часовым поясом (`Z` или `+03:00`).
 - `own_ids` — пользователи, которые видят запись.
+- `category` — тип записи, по умолчанию `reminder`:
+
+  | Значение | Что это |
+  |---|---|
+  | `reminder` | обычное напоминание |
+  | `food` | запись о корме (журнал питания) |
+  | `vaccination` | вакцинация |
+  | `parasites` | обработка от паразитов |
+  | `vet_visit` | посещение ветеринара, заключение — в `text` |
+  | `medication` | приём препарата |
+
+- Только для `category: "food"` (для других типов — 422):
+  - `liked` — понравилось (`true`) / не понравилось (`false`) / не оценено (`null`);
+  - `suitable` — подошло (`true`) / не подошло (`false`) / не оценено (`null`);
+  - `reactions` — нежелательные реакции: `gi` (ЖКТ), `allergy` (аллергия), `other`. Повторы убираются.
+- Записи `food` никогда не становятся уведомлениями — это история питания, а не напоминания.
 
 ### Доступ и владельцы
 - Пользователь видит только тех питомцев и те записи, где его `id` есть в `own_ids`. На чужие объекты API отвечает 404.
@@ -196,6 +216,7 @@ if (pet.has_picture) {
 | POST | `/prop/add` | `PropIn` | 201 `Prop` |
 | GET | `/prop/list` | — | 200 `Prop[]` — все записи пользователя, по `date` |
 | GET | `/prop/list?pet_id=1` | — | 200 `Prop[]` — записи питомца, по `date` (404, если питомец чужой) |
+| GET | `/prop/list?pet_id=1&category=food&suitable=true` | — | 200 `Prop[]` — с фильтрами, см. ниже |
 | GET | `/prop/get?prop_id=5` | — | 200 `Prop` |
 | PUT | `/prop/edit?prop_id=5` | `PropIn` | 200 `Prop` |
 | DELETE | `/prop/del?prop_id=5` | — | 204 |
@@ -210,10 +231,28 @@ if (pet.has_picture) {
   "msg": "Не забыть паспорт",
   "text": null,
   "rep": false,
-  "own_ids": []
+  "own_ids": [],
+  "category": "reminder"
 }
 ```
 Обязательны `name` и `date`.
+
+Запись о корме:
+```json
+{
+  "name": "Royal Canin Sterilised",
+  "date": "2026-10-16T09:00:00Z",
+  "category": "food",
+  "liked": true,
+  "suitable": false,
+  "reactions": ["gi"],
+  "text": "Мягкий стул на второй день"
+}
+```
+
+Фильтры `GET /prop/list` (все необязательные, комбинируются с `pet_id` и между собой):
+- `category` — тип записи: `?category=vaccination` — история вакцинаций;
+- `liked`, `suitable` — `true`/`false`: `?pet_id=1&category=food&suitable=true` — корма, которые подошли питомцу.
 
 `DELETE /prop/del` сам убирает запись из `prop_ids` всех питомцев.
 

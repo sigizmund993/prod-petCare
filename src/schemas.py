@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 
 
 class UserIn(BaseModel):
@@ -65,6 +65,12 @@ class Pet(PetIn):
     has_picture: bool
 
 
+# reminder — обычное напоминание; остальные — записи истории ухода
+PropCategory = Literal["reminder", "food", "vaccination", "parasites", "vet_visit", "medication"]
+# gi — проблемы с ЖКТ, allergy — аллергическая реакция
+Reaction = Literal["gi", "allergy", "other"]
+
+
 class PropIn(BaseModel):
     name: str
     msg: str | None = None
@@ -72,6 +78,22 @@ class PropIn(BaseModel):
     rep: bool = False
     date: datetime
     own_ids: list[int] = []
+    category: PropCategory = "reminder"
+    # Только для category = "food": понравилось, подошло (null — не оценено) и нежелательные реакции
+    liked: bool | None = None
+    suitable: bool | None = None
+    reactions: list[Reaction] = []
+
+    @field_validator("reactions")
+    @classmethod
+    def unique_reactions(cls, v: list[str]) -> list[str]:
+        return list(dict.fromkeys(v))
+
+    @model_validator(mode="after")
+    def food_fields_only_for_food(self):
+        if self.category != "food" and (self.liked is not None or self.suitable is not None or self.reactions):
+            raise ValueError("liked, suitable and reactions are only allowed for category food")
+        return self
 
 
 class Prop(PropIn):
