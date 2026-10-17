@@ -1,0 +1,10 @@
+CREATE TABLE IF NOT EXISTS pet_photos (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    pet_id BIGINT NOT NULL REFERENCES pets(id) ON DELETE CASCADE,
+    photo_url TEXT NOT NULL,
+    is_main BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS pet_photos_pet_id_idx
+    ON pet_photos (pet_id);

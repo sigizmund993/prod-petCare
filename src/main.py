@@ -9,6 +9,19 @@ from src.handlers_pet import router as pet_router
 from src.handlers_prop import router as prop_router
 from src.handlers_user import router as user_router
 
+from db.photo_upload import router as photo_router
+
+from pathlib import Path
+from fastapi.staticfiles import StaticFiles
+
+app = FastAPI(title="PetCare API", lifespan=lifespan)
+PHOTO_DIR = Path(__file__).resolve().parent.parent / "db" / "photo_pets"
+
+app.mount(
+    "/photos",
+    StaticFiles(directory=str(PHOTO_DIR)),
+    name="photos",
+)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -30,3 +43,4 @@ app.add_middleware(
 app.include_router(user_router)
 app.include_router(pet_router)
 app.include_router(prop_router)
+app.include_router(photo_router)
