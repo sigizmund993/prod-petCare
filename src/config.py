@@ -10,6 +10,8 @@ CORS_ORIGINS = [o.strip() for o in os.getenv("CORS_ORIGIN", "").split(",") if o.
 CORS_ALLOW_LOCALHOST = os.getenv("CORS_ALLOW_LOCALHOST", "1").lower() in ("1", "true", "yes")
 JWT_SECRET = os.getenv("JWT_SECRET", "dev-secret")
 JWT_TTL_HOURS = int(os.getenv("JWT_TTL_HOURS", "24"))
+# Часовой пояс, в котором наступает «сегодня» для дней рождения питомцев
+TIMEZONE = os.getenv("TIMEZONE", "Europe/Moscow")
 
 # Подтверждение почты
 EMAIL_CODE_TTL_MINUTES = int(os.getenv("EMAIL_CODE_TTL_MINUTES", "15"))

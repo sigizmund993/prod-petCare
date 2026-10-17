@@ -1,11 +1,11 @@
-from datetime import datetime
+from datetime import date, datetime
 
 from psycopg import Connection
 
 from db import db
 
 USER_COLUMNS = "id, email, phone_number, name, email_verified"
-PET_COLUMNS = "id, name, type, breed, own_ids, prop_ids, picture IS NOT NULL AS has_picture"
+PET_COLUMNS = "id, name, type, breed, birth_date, own_ids, prop_ids, picture IS NOT NULL AS has_picture"
 PROP_COLUMNS = "id, name, msg, text, rep, date, own_ids"
 
 
@@ -123,12 +123,12 @@ def delete_user(user_id: int) -> bool:
 
 # ---------- pets ----------
 
-def create_pet(user_id: int, name: str, type: str | None, breed: str | None, own_ids: list[int], prop_ids: list[int]) -> dict:
+def create_pet(user_id: int, name: str, type: str | None, breed: str | None, birth_date: date | None, own_ids: list[int], prop_ids: list[int]) -> dict:
     with db.pool.connection() as conn:
         _check_refs(conn, user_id, own_ids, prop_ids)
         return conn.execute(
-            f"INSERT INTO pets (name, type, breed, own_ids, prop_ids) VALUES (%s, %s, %s, %s, %s) RETURNING {PET_COLUMNS}",
-            (name, type, breed, own_ids, prop_ids),
+            f"INSERT INTO pets (name, type, breed, birth_date, own_ids, prop_ids) VALUES (%s, %s, %s, %s, %s, %s) RETURNING {PET_COLUMNS}",
+            (name, type, breed, birth_date, own_ids, prop_ids),
         ).fetchone()
 
 
@@ -146,12 +146,12 @@ def list_pets(user_id: int) -> list[dict]:
         ).fetchall()
 
 
-def update_pet(pet_id: int, user_id: int, name: str, type: str | None, breed: str | None, own_ids: list[int], prop_ids: list[int]) -> dict | None:
+def update_pet(pet_id: int, user_id: int, name: str, type: str | None, breed: str | None, birth_date: date | None, own_ids: list[int], prop_ids: list[int]) -> dict | None:
     with db.pool.connection() as conn:
         _check_refs(conn, user_id, own_ids, prop_ids)
         return conn.execute(
-            f"UPDATE pets SET name = %s, type = %s, breed = %s, own_ids = %s, prop_ids = %s WHERE id = %s AND %s = ANY(own_ids) RETURNING {PET_COLUMNS}",
-            (name, type, breed, own_ids, prop_ids, pet_id, user_id),
+            f"UPDATE pets SET name = %s, type = %s, breed = %s, birth_date = %s, own_ids = %s, prop_ids = %s WHERE id = %s AND %s = ANY(own_ids) RETURNING {PET_COLUMNS}",
+            (name, type, breed, birth_date, own_ids, prop_ids, pet_id, user_id),
         ).fetchone()
 
 
@@ -255,14 +255,36 @@ _DUE_PROPS = f"""
 """
 
 
+# День рождения в этом году (29 февраля в невисокосный год становится 28-м); today — дата в часовом поясе %(tz)s
+_BIRTHDAYS = """
+    SELECT p.id, p.name, p.own_ids, y.years, b.day,
+           b.day::timestamp AT TIME ZONE %(tz)s AS date
+    FROM pets p
+    CROSS JOIN (SELECT (now() AT TIME ZONE %(tz)s)::date AS today) t
+    CROSS JOIN LATERAL (SELECT (extract(year FROM t.today) - extract(year FROM p.birth_date))::int AS years) y
+    CROSS JOIN LATERAL (SELECT (p.birth_date + make_interval(years => y.years))::date AS day) b
+    LEFT JOIN birthday_reads r ON r.pet_id = p.id AND r.user_id = %(user_id)s
+    WHERE %(user_id)s = ANY(p.own_ids) AND y.years >= 1 AND b.day = t.today
+      AND (r.read_date IS NULL OR r.read_date < b.day)
+"""
+
+
 def list_notifications(user_id: int) -> list[dict]:
     with db.pool.connection() as conn:
         return conn.execute(f"{_DUE_PROPS} ORDER BY date DESC", {"user_id": user_id}).fetchall()
 
 
-def count_notifications(user_id: int) -> int:
+def list_birthdays(user_id: int, tz: str) -> list[dict]:
     with db.pool.connection() as conn:
-        return conn.execute(f"SELECT count(*) AS n FROM ({_DUE_PROPS}) due", {"user_id": user_id}).fetchone()["n"]
+        return conn.execute(f"{_BIRTHDAYS} ORDER BY p.id", {"user_id": user_id, "tz": tz}).fetchall()
+
+
+def count_notifications(user_id: int, tz: str) -> int:
+    with db.pool.connection() as conn:
+        return conn.execute(
+            f"SELECT (SELECT count(*) FROM ({_DUE_PROPS}) d) + (SELECT count(*) FROM ({_BIRTHDAYS}) b) AS n",
+            {"user_id": user_id, "tz": tz},
+        ).fetchone()["n"]
 
 
 def read_notifications(user_id: int, prop_id: int | None = None) -> int:
@@ -276,4 +298,17 @@ def read_notifications(user_id: int, prop_id: int | None = None) -> int:
             ON CONFLICT (user_id, prop_id) DO UPDATE SET read_date = EXCLUDED.read_date
             """,
             {"user_id": user_id, "prop_id": prop_id},
+        ).rowcount
+
+
+def read_birthdays(user_id: int, tz: str, pet_id: int | None = None) -> int:
+    with db.pool.connection() as conn:
+        return conn.execute(
+            f"""
+            INSERT INTO birthday_reads (user_id, pet_id, read_date)
+            SELECT %(user_id)s, id, day FROM ({_BIRTHDAYS}) due
+            WHERE %(pet_id)s::bigint IS NULL OR id = %(pet_id)s
+            ON CONFLICT (user_id, pet_id) DO UPDATE SET read_date = EXCLUDED.read_date
+            """,
+            {"user_id": user_id, "tz": tz, "pet_id": pet_id},
         ).rowcount

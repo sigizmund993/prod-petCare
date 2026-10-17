@@ -11,3 +11,8 @@ Dockerfile
 .dockerignore
 .idea
 .vscode
+.ruff_cache
+.pytest_cache
+.coverage
+htmlcov
+tests

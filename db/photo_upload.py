@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
 from fastapi.responses import Response
 
 from db import queries
@@ -39,7 +39,7 @@ def is_valid_image(content: bytes, content_type: str) -> bool:
 @router.post("/pets/{pet_id}/photo")
 def upload_pet_photo(
     pet_id: int,
-    file: UploadFile = File(...),
+    file: UploadFile,
     user_id: int = Depends(current_user_id),
 ):
     content_type = file.content_type or ""

@@ -1,4 +1,5 @@
-from datetime import datetime
+from datetime import date, datetime
+from typing import Literal
 
 from pydantic import BaseModel, field_validator
 
@@ -47,8 +48,16 @@ class PetIn(BaseModel):
     name: str
     type: str | None = None
     breed: str | None = None
+    birth_date: date | None = None
     own_ids: list[int] = []
     prop_ids: list[int] = []
+
+    @field_validator("birth_date")
+    @classmethod
+    def birth_date_not_in_future(cls, v: date | None) -> date | None:
+        if v is not None and v > date.today():
+            raise ValueError("birth_date must not be in the future")
+        return v
 
 
 class Pet(PetIn):
@@ -67,6 +76,12 @@ class PropIn(BaseModel):
 
 class Prop(PropIn):
     id: int
+
+
+class Notification(Prop):
+    # prop — наступившая запись (id — это id записи), birthday — день рождения питомца (id = pet_id)
+    kind: Literal["prop", "birthday"] = "prop"
+    pet_id: int | None = None
 
 
 class NotificationCount(BaseModel):

@@ -41,3 +41,11 @@ def with_owner(own_ids: list[int], user_id: int) -> list[int]:
     # Текущий пользователь всегда остаётся среди владельцев
     ids = list(dict.fromkeys(own_ids))
     return ids if user_id in ids else [user_id, *ids]
+
+
+def years_word(n: int) -> str:
+    if n % 10 == 1 and n % 100 != 11:
+        return "год"
+    if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
+        return "года"
+    return "лет"
