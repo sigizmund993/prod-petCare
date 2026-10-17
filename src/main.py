@@ -24,7 +24,8 @@ app = FastAPI(title="PetCare API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[config.CORS_ORIGIN],
+    allow_origins=config.CORS_ORIGINS,
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?" if config.CORS_ALLOW_LOCALHOST else None,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

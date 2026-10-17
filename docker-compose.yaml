@@ -25,7 +25,8 @@ services:
       - "8080:8080"
     environment:
       - DATABASE_URL=postgresql://user:password@db:5432/petcare
-      - CORS_ORIGIN=${CORS_ORIGIN:-http://localhost}
+      - CORS_ORIGIN=${CORS_ORIGIN:-}
+      - CORS_ALLOW_LOCALHOST=${CORS_ALLOW_LOCALHOST:-1}
       - JWT_SECRET=${JWT_SECRET:-dev-secret}
     volumes:
       - .:/app

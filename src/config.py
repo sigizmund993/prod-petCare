@@ -4,7 +4,10 @@ DATABASE_URL = os.getenv(
     "DATABASE_URL",
     "postgresql://user:password@localhost:5433/petcare",
 )
-CORS_ORIGIN = os.getenv("CORS_ORIGIN", "http://localhost")
+# CORS: список origin через запятую. Плюс, если CORS_ALLOW_LOCALHOST включён,
+# любой http(s)://localhost:<порт> и 127.0.0.1:<порт>, чтобы фронт можно было запускать локально
+CORS_ORIGINS = [o.strip() for o in os.getenv("CORS_ORIGIN", "").split(",") if o.strip()]
+CORS_ALLOW_LOCALHOST = os.getenv("CORS_ALLOW_LOCALHOST", "1").lower() in ("1", "true", "yes")
 JWT_SECRET = os.getenv("JWT_SECRET", "dev-secret")
 JWT_TTL_HOURS = int(os.getenv("JWT_TTL_HOURS", "24"))
 

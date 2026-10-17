@@ -33,7 +33,9 @@ CI-переменные (Spirit → Код → Репозитории → реп
 | `JWT_SECRET` | Переменная, защищённая | секрет для JWT |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_FROM`, `SMTP_TLS` | Переменная | SMTP-сервер для кодов подтверждения почты; `SMTP_TLS`: `starttls` (порт 587), `ssl` (465) или `none`. Без `SMTP_HOST` коды пишутся в лог приложения |
 | `SMTP_PASSWORD` | Переменная, защищённая | пароль SMTP (для Яндекса/Mail.ru — пароль приложения) |
-| `DEPLOY_USER`, `APP_PORT`, `POSTGRES_USER`, `POSTGRES_DB`, `CORS_ORIGIN` | Переменная, необязательно | по умолчанию `root`, `8080`, `petcare`, `petcare`, `http://localhost` |
+| `DEPLOY_USER`, `APP_PORT`, `POSTGRES_USER`, `POSTGRES_DB` | Переменная, необязательно | по умолчанию `root`, `8080`, `petcare`, `petcare` |
+| `CORS_ORIGIN` | Переменная, необязательно | адреса фронта через запятую, по умолчанию пусто |
+| `CORS_ALLOW_LOCALHOST` | Переменная, необязательно | `1` (по умолчанию) — пускать фронт с `localhost`/`127.0.0.1` на любом порту; `0` — выключить |
 
 На ВМ всё лежит в `~/app` (`docker-compose.yml`, `.env`).
 
