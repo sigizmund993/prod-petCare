@@ -13,7 +13,7 @@ stages:
   - build
 
 variables:
-  IMAGE_NAME: petcate-backend
+  IMAGE_NAME: petcare-backend
   DOCKER_TLS_CERTDIR: "/certs"
   DOCKER_BUILDKIT: "1"
 

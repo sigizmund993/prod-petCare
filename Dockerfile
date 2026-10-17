@@ -15,17 +15,17 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 
+EXPOSE 8080
+
 # ---------- dev ----------
 FROM base AS dev
 
 COPY requirements-dev.txt .
 RUN pip install -r requirements-dev.txt
 
-# Локально код перекрывается volume'ом из docker-compose.dev.yml
 COPY . .
 
-# watchfiles перезапускает приложение при изменении .py файлов
-CMD ["watchfiles", "--filter", "python", "python main.py", "/app"]
+CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8080", "--reload"]
 
 # ---------- prod ----------
 FROM base AS prod
@@ -39,4 +39,4 @@ COPY --chown=app:app . .
 
 USER app
 
-CMD ["python", "main.py"]
+CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8080"]

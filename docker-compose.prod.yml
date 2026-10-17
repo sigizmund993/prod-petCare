@@ -1,7 +1,0 @@
-services:
-  db:
-    restart: unless-stopped
-
-  app:
-    image: ${IMAGE}:${IMAGE_TAG:-latest}
-    restart: unless-stopped
