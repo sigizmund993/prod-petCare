@@ -6,7 +6,7 @@ lint:
 run-dev:
 	docker compose up --build
 run-prod:
-	docker compose -f docker-compose.prod.yaml pull
-	docker compose -f docker-compose.prod.yaml up
+	docker compose -f deploy/docker-compose.yml pull
+	docker compose -f deploy/docker-compose.yml up
 clear-db-dev:
 	docker compose down -v
