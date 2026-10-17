@@ -65,11 +65,13 @@ POST /user/add  ──►  на почту приходит 6-значный к�
   "name": "Барсик",
   "type": "кошка",
   "breed": "британская",
+  "birth_date": "2020-05-17",
   "own_ids": [1, 2],
   "prop_ids": [5, 7]
 }
 ```
 - `type` — вид животного, `breed` — порода; обе строки необязательны (`null`).
+- `birth_date` — дата рождения в формате `YYYY-MM-DD`, необязательна (`null`). Дата из будущего — 422 с `loc: ["body", "birth_date"]`.
 - `own_ids` — id пользователей-владельцев.
 - `prop_ids` — id записей (Prop), привязанных к питомцу.
 
@@ -151,9 +153,9 @@ POST /user/add  ──►  на почту приходит 6-значный к�
 
 `PetIn`:
 ```json
-{ "name": "Барсик", "type": "кошка", "breed": "британская", "own_ids": [2], "prop_ids": [5] }
+{ "name": "Барсик", "type": "кошка", "breed": "британская", "birth_date": "2020-05-17", "own_ids": [2], "prop_ids": [5] }
 ```
-Обязательно только `name`. `type` и `breed` по умолчанию `null`, `own_ids` и `prop_ids` — `[]`.
+Обязательно только `name`. `type`, `breed` и `birth_date` по умолчанию `null`, `own_ids` и `prop_ids` — `[]`.
 
 ### Prop
 

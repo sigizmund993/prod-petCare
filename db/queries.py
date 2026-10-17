@@ -1,11 +1,11 @@
-from datetime import datetime
+from datetime import date, datetime
 
 from psycopg import Connection
 
 from db import db
 
 USER_COLUMNS = "id, email, phone_number, name, email_verified"
-PET_COLUMNS = "id, name, type, breed, own_ids, prop_ids"
+PET_COLUMNS = "id, name, type, breed, birth_date, own_ids, prop_ids"
 PROP_COLUMNS = "id, name, msg, text, rep, date, own_ids"
 
 
@@ -123,12 +123,12 @@ def delete_user(user_id: int) -> bool:
 
 # ---------- pets ----------
 
-def create_pet(user_id: int, name: str, type: str | None, breed: str | None, own_ids: list[int], prop_ids: list[int]) -> dict:
+def create_pet(user_id: int, name: str, type: str | None, breed: str | None, birth_date: date | None, own_ids: list[int], prop_ids: list[int]) -> dict:
     with db.pool.connection() as conn:
         _check_refs(conn, user_id, own_ids, prop_ids)
         return conn.execute(
-            f"INSERT INTO pets (name, type, breed, own_ids, prop_ids) VALUES (%s, %s, %s, %s, %s) RETURNING {PET_COLUMNS}",
-            (name, type, breed, own_ids, prop_ids),
+            f"INSERT INTO pets (name, type, breed, birth_date, own_ids, prop_ids) VALUES (%s, %s, %s, %s, %s, %s) RETURNING {PET_COLUMNS}",
+            (name, type, breed, birth_date, own_ids, prop_ids),
         ).fetchone()
 
 
@@ -146,12 +146,12 @@ def list_pets(user_id: int) -> list[dict]:
         ).fetchall()
 
 
-def update_pet(pet_id: int, user_id: int, name: str, type: str | None, breed: str | None, own_ids: list[int], prop_ids: list[int]) -> dict | None:
+def update_pet(pet_id: int, user_id: int, name: str, type: str | None, breed: str | None, birth_date: date | None, own_ids: list[int], prop_ids: list[int]) -> dict | None:
     with db.pool.connection() as conn:
         _check_refs(conn, user_id, own_ids, prop_ids)
         return conn.execute(
-            f"UPDATE pets SET name = %s, type = %s, breed = %s, own_ids = %s, prop_ids = %s WHERE id = %s AND %s = ANY(own_ids) RETURNING {PET_COLUMNS}",
-            (name, type, breed, own_ids, prop_ids, pet_id, user_id),
+            f"UPDATE pets SET name = %s, type = %s, breed = %s, birth_date = %s, own_ids = %s, prop_ids = %s WHERE id = %s AND %s = ANY(own_ids) RETURNING {PET_COLUMNS}",
+            (name, type, breed, birth_date, own_ids, prop_ids, pet_id, user_id),
         ).fetchone()
 
 

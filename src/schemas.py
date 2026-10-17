@@ -1,6 +1,6 @@
-from datetime import datetime
+from datetime import date, datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 
 class UserIn(BaseModel):
@@ -41,8 +41,16 @@ class PetIn(BaseModel):
     name: str
     type: str | None = None
     breed: str | None = None
+    birth_date: date | None = None
     own_ids: list[int] = []
     prop_ids: list[int] = []
+
+    @field_validator("birth_date")
+    @classmethod
+    def birth_date_not_in_future(cls, v: date | None) -> date | None:
+        if v is not None and v > date.today():
+            raise ValueError("birth_date must not be in the future")
+        return v
 
 
 class Pet(PetIn):

@@ -7,6 +7,7 @@ include:
       - /jobs/rules.yaml
 
 stages:
+  - test
   - build
   - deploy
 
@@ -38,6 +39,47 @@ variables:
   SMTP_USER: ""
   SMTP_FROM: ""
   SMTP_TLS: starttls
+
+# 0. Проверки: линтер и тесты. Если они упали, образ не собирается и деплоя не будет
+.python_job:
+  stage: test
+  image: python:3.12-slim
+  extends:
+    - .rules-merge-or-master-or-parent
+  needs: []
+  before_script:
+    - pip install -q -r requirements.txt -r requirements-dev.txt
+
+lint:
+  extends: .python_job
+  script:
+    - ruff check .
+
+test:
+  extends: .python_job
+  services:
+    - name: postgres:17
+      alias: postgres
+  # CI-переменные Spirit (POSTGRES_PASSWORD) приоритетнее этих значений, поэтому адрес БД
+  # собираем из тех же переменных, которые получает сервис postgres
+  variables:
+    POSTGRES_USER: test
+    POSTGRES_PASSWORD: test
+    POSTGRES_DB: petcare_test
+    TEST_DATABASE_URL: postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@postgres:5432/$POSTGRES_DB
+  script:
+    - pytest -v --cov --cov-report=term --cov-report=xml --cov-report=html --junitxml=report.xml
+  coverage: '/^TOTAL.*\s+(\d+%)$/'
+  artifacts:
+    when: always
+    expire_in: 30 days
+    paths:
+      - htmlcov/
+    reports:
+      junit: report.xml
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage.xml
 
 # 1. Сборка образа через Kaniko и публикация в registry.
 # Kaniko собирает последнюю стадию Dockerfile — это prod
