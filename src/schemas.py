@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from typing import Literal
 
 from pydantic import BaseModel, field_validator
 
@@ -68,6 +69,12 @@ class PropIn(BaseModel):
 
 class Prop(PropIn):
     id: int
+
+
+class Notification(Prop):
+    # prop — наступившая запись (id — это id записи), birthday — день рождения питомца (id = pet_id)
+    kind: Literal["prop", "birthday"] = "prop"
+    pet_id: int | None = None
 
 
 class NotificationCount(BaseModel):

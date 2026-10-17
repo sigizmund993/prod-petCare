@@ -18,7 +18,7 @@ from src import handlers_user
 from src.main import app
 
 SQL_DIR = Path(__file__).resolve().parent.parent / "sql"
-TABLES = "notification_reads, email_codes, props, pets, users"
+TABLES = "birthday_reads, notification_reads, email_codes, props, pets, users"
 
 
 def _sql(query: str) -> None:

@@ -7,13 +7,7 @@ from fastapi.security import HTTPAuthorizationCredentials
 
 from src import config
 from src.auth import create_token, current_user_id
-from src.helpers import (
-    hash_email_code,
-    hash_password,
-    new_email_code,
-    verify_password,
-    with_owner,
-)
+from src.helpers import hash_email_code, hash_password, new_email_code, verify_password, with_owner, years_word
 
 
 def test_password_hash_roundtrip():
@@ -70,3 +64,11 @@ def test_token_with_wrong_secret_rejected():
     token = jwt.encode({"sub": "42", "exp": datetime.now(UTC) + timedelta(hours=1)}, "another-secret-that-is-long-enough-too", algorithm="HS256")
     with pytest.raises(HTTPException):
         current_user_id(_bearer(token))
+
+
+@pytest.mark.parametrize(
+    "n, word",
+    [(1, "год"), (2, "года"), (4, "года"), (5, "лет"), (11, "лет"), (12, "лет"), (14, "лет"), (21, "год"), (22, "года"), (25, "лет"), (111, "лет")],
+)
+def test_years_word(n, word):
+    assert years_word(n) == word
