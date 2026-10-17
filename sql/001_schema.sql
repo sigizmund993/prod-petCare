@@ -1,0 +1,24 @@
+CREATE TABLE IF NOT EXISTS users (
+    id           BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    email        TEXT NOT NULL UNIQUE,
+    phone_number TEXT,
+    passwd       TEXT NOT NULL,
+    name         TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS pets (
+    id       BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name     TEXT NOT NULL,
+    own_ids  BIGINT[] NOT NULL DEFAULT '{}',
+    prop_ids BIGINT[] NOT NULL DEFAULT '{}'
+);
+
+CREATE TABLE IF NOT EXISTS props (
+    id      BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name    TEXT NOT NULL,
+    msg     TEXT,
+    text    TEXT,
+    rep     BOOLEAN NOT NULL DEFAULT FALSE,
+    date    TIMESTAMPTZ NOT NULL,
+    own_ids BIGINT[] NOT NULL DEFAULT '{}'
+);
