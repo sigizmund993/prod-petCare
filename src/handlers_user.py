@@ -1,10 +1,14 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+import hmac
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from psycopg.errors import UniqueViolation
 
 from db import queries
+from src import config
 from src.auth import create_token, current_user_id
-from src.helpers import hash_password, not_found, verify_password
-from src.schemas import LoginIn, Token, User, UserIn
+from src.helpers import hash_email_code, hash_password, new_email_code, not_found, verify_password
+from src.mailer import send_mail
+from src.schemas import EmailCodeIn, EmailIn, LoginIn, Token, User, UserIn
 
 router = APIRouter(prefix="/user", tags=["user"])
 
@@ -13,12 +17,47 @@ def email_taken():
     raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
 
 
+def send_email_code(user_id: int, email: str, background_tasks: BackgroundTasks) -> None:
+    # Код не отправляется повторно, если предыдущий ушёл меньше EMAIL_CODE_RESEND_SECONDS назад
+    code = new_email_code()
+    saved = queries.save_email_code(
+        user_id, hash_email_code(user_id, code), config.EMAIL_CODE_TTL_MINUTES, config.EMAIL_CODE_RESEND_SECONDS
+    )
+    if saved:
+        background_tasks.add_task(
+            send_mail,
+            email,
+            "PetCare: код подтверждения почты",
+            f"Ваш код подтверждения: {code}\n\nКод действует {config.EMAIL_CODE_TTL_MINUTES} минут.",
+        )
+
+
 @router.post("/add", response_model=User, status_code=status.HTTP_201_CREATED)
-def user_add(user: UserIn):
+def user_add(user: UserIn, background_tasks: BackgroundTasks):
     try:
-        return queries.create_user(user.email, user.phone_number, hash_password(user.passwd), user.name)
+        created = queries.create_user(user.email, user.phone_number, hash_password(user.passwd), user.name)
     except UniqueViolation:
         email_taken()
+    send_email_code(created["id"], created["email"], background_tasks)
+    return created
+
+
+@router.post("/verify", response_model=Token)
+def user_verify(body: EmailCodeIn):
+    user = queries.get_user_by_email(body.email)
+    code_hash = queries.take_email_code_attempt(user["id"], config.EMAIL_CODE_MAX_ATTEMPTS) if user else None
+    if code_hash is None or not hmac.compare_digest(code_hash, hash_email_code(user["id"], body.code.strip())):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Wrong or expired code")
+    queries.mark_email_verified(user["id"])
+    return Token(access_token=create_token(user["id"]))
+
+
+@router.post("/verify/resend", status_code=status.HTTP_204_NO_CONTENT)
+def user_verify_resend(body: EmailIn, background_tasks: BackgroundTasks):
+    # Ответ всегда 204, чтобы по нему нельзя было узнать, зарегистрирована ли почта
+    user = queries.get_user_by_email(body.email)
+    if user is not None and not user["email_verified"]:
+        send_email_code(user["id"], user["email"], background_tasks)
 
 
 @router.post("/login", response_model=Token)
@@ -26,6 +65,8 @@ def user_login(creds: LoginIn):
     user = queries.get_user_credentials(creds.email)
     if user is None or not verify_password(creds.passwd, user["passwd"]):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Wrong email or password")
+    if not user["email_verified"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Email not verified")
     return Token(access_token=create_token(user["id"]))
 
 
@@ -38,13 +79,15 @@ def user_me(user_id: int = Depends(current_user_id)):
 
 
 @router.put("/edit", response_model=User)
-def user_edit(user: UserIn, user_id: int = Depends(current_user_id)):
+def user_edit(user: UserIn, background_tasks: BackgroundTasks, user_id: int = Depends(current_user_id)):
     try:
         updated = queries.update_user(user_id, user.email, user.phone_number, hash_password(user.passwd), user.name)
     except UniqueViolation:
         email_taken()
     if updated is None:
         not_found("User")
+    if not updated["email_verified"]:
+        send_email_code(user_id, updated["email"], background_tasks)
     return updated
 
 

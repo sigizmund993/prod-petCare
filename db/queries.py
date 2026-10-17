@@ -4,8 +4,8 @@ from psycopg import Connection
 
 from db import db
 
-USER_COLUMNS = "id, email, phone_number, name"
-PET_COLUMNS = "id, name, own_ids, prop_ids"
+USER_COLUMNS = "id, email, phone_number, name, email_verified"
+PET_COLUMNS = "id, name, type, breed, own_ids, prop_ids"
 PROP_COLUMNS = "id, name, msg, text, rep, date, own_ids"
 
 
@@ -51,15 +51,58 @@ def get_user(user_id: int) -> dict | None:
 
 def get_user_credentials(email: str) -> dict | None:
     with db.pool.connection() as conn:
-        return conn.execute("SELECT id, passwd FROM users WHERE email = %s", (email,)).fetchone()
+        return conn.execute("SELECT id, passwd, email_verified FROM users WHERE email = %s", (email,)).fetchone()
 
 
 def update_user(user_id: int, email: str, phone_number: str | None, passwd: str, name: str) -> dict | None:
+    # Смена почты сбрасывает её подтверждение (справа от SET — старые значения строки)
     with db.pool.connection() as conn:
         return conn.execute(
-            f"UPDATE users SET email = %s, phone_number = %s, passwd = %s, name = %s WHERE id = %s RETURNING {USER_COLUMNS}",
-            (email, phone_number, passwd, name, user_id),
+            "UPDATE users SET email = %s, phone_number = %s, passwd = %s, name = %s, "
+            f"email_verified = email_verified AND email = %s WHERE id = %s RETURNING {USER_COLUMNS}",
+            (email, phone_number, passwd, name, email, user_id),
         ).fetchone()
+
+
+def get_user_by_email(email: str) -> dict | None:
+    with db.pool.connection() as conn:
+        return conn.execute(f"SELECT {USER_COLUMNS} FROM users WHERE email = %s", (email,)).fetchone()
+
+
+# ---------- коды подтверждения почты ----------
+
+def save_email_code(user_id: int, code_hash: str, ttl_minutes: int, resend_seconds: int) -> bool:
+    # Новый код заменяет старый, но не чаще раза в resend_seconds; False — если ещё рано
+    with db.pool.connection() as conn:
+        row = conn.execute(
+            """
+            INSERT INTO email_codes (user_id, code_hash, expires_at)
+            VALUES (%(user_id)s, %(code_hash)s, now() + make_interval(mins => %(ttl)s))
+            ON CONFLICT (user_id) DO UPDATE
+                SET code_hash = EXCLUDED.code_hash, expires_at = EXCLUDED.expires_at, sent_at = now(), attempts = 0
+                WHERE email_codes.sent_at < now() - make_interval(secs => %(resend)s)
+            RETURNING user_id
+            """,
+            {"user_id": user_id, "code_hash": code_hash, "ttl": ttl_minutes, "resend": resend_seconds},
+        ).fetchone()
+        return row is not None
+
+
+def take_email_code_attempt(user_id: int, max_attempts: int) -> str | None:
+    # Списываем попытку и отдаём хэш действующего кода; None — кода нет, истёк или попытки кончились
+    with db.pool.connection() as conn:
+        row = conn.execute(
+            "UPDATE email_codes SET attempts = attempts + 1 "
+            "WHERE user_id = %s AND attempts < %s AND expires_at > now() RETURNING code_hash",
+            (user_id, max_attempts),
+        ).fetchone()
+        return row["code_hash"] if row else None
+
+
+def mark_email_verified(user_id: int) -> None:
+    with db.pool.connection() as conn:
+        conn.execute("UPDATE users SET email_verified = TRUE WHERE id = %s", (user_id,))
+        conn.execute("DELETE FROM email_codes WHERE user_id = %s", (user_id,))
 
 
 def delete_user(user_id: int) -> bool:
@@ -80,12 +123,12 @@ def delete_user(user_id: int) -> bool:
 
 # ---------- pets ----------
 
-def create_pet(user_id: int, name: str, own_ids: list[int], prop_ids: list[int]) -> dict:
+def create_pet(user_id: int, name: str, type: str | None, breed: str | None, own_ids: list[int], prop_ids: list[int]) -> dict:
     with db.pool.connection() as conn:
         _check_refs(conn, user_id, own_ids, prop_ids)
         return conn.execute(
-            f"INSERT INTO pets (name, own_ids, prop_ids) VALUES (%s, %s, %s) RETURNING {PET_COLUMNS}",
-            (name, own_ids, prop_ids),
+            f"INSERT INTO pets (name, type, breed, own_ids, prop_ids) VALUES (%s, %s, %s, %s, %s) RETURNING {PET_COLUMNS}",
+            (name, type, breed, own_ids, prop_ids),
         ).fetchone()
 
 
@@ -103,12 +146,12 @@ def list_pets(user_id: int) -> list[dict]:
         ).fetchall()
 
 
-def update_pet(pet_id: int, user_id: int, name: str, own_ids: list[int], prop_ids: list[int]) -> dict | None:
+def update_pet(pet_id: int, user_id: int, name: str, type: str | None, breed: str | None, own_ids: list[int], prop_ids: list[int]) -> dict | None:
     with db.pool.connection() as conn:
         _check_refs(conn, user_id, own_ids, prop_ids)
         return conn.execute(
-            f"UPDATE pets SET name = %s, own_ids = %s, prop_ids = %s WHERE id = %s AND %s = ANY(own_ids) RETURNING {PET_COLUMNS}",
-            (name, own_ids, prop_ids, pet_id, user_id),
+            f"UPDATE pets SET name = %s, type = %s, breed = %s, own_ids = %s, prop_ids = %s WHERE id = %s AND %s = ANY(own_ids) RETURNING {PET_COLUMNS}",
+            (name, type, breed, own_ids, prop_ids, pet_id, user_id),
         ).fetchone()
 
 

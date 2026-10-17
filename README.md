@@ -8,6 +8,15 @@ src/      FastAPI приложение и хендлеры
 
 Запуск: `make run-dev` → http://localhost:8080/docs
 
+## Подтверждение почты
+
+1. `POST /user/add` — регистрация, на почту уходит 6-значный код (локально без SMTP — в лог: `docker compose logs app`).
+2. `POST /user/verify` `{"email", "code"}` — подтверждает почту и сразу возвращает токен.
+3. `POST /user/verify/resend` `{"email"}` — новый код (не чаще раза в минуту, ответ всегда 204).
+
+Пока почта не подтверждена, `POST /user/login` отвечает 403 `Email not verified`. Код живёт 15 минут, даётся 5 попыток.
+Смена почты в `PUT /user/edit` снова делает её неподтверждённой и отправляет код на новый адрес.
+
 ## Деплой (Spirit GitLab)
 
 `push` в `master` → `build:image` (Kaniko, prod-стадия Dockerfile → Spirit Registry) → `setup:vm` (ставит `dp`) → `deploy:vm` (ssh + `docker compose` из `deploy/docker-compose.yml`).
@@ -22,6 +31,8 @@ CI-переменные (Spirit → Код → Репозитории → реп
 | `DEPLOY_HOST` | Переменная | адрес ВМ |
 | `POSTGRES_PASSWORD` | Переменная, защищённая | пароль БД (без `@ : / ?` — он подставляется в `DATABASE_URL`) |
 | `JWT_SECRET` | Переменная, защищённая | секрет для JWT |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_FROM`, `SMTP_TLS` | Переменная | SMTP-сервер для кодов подтверждения почты; `SMTP_TLS`: `starttls` (порт 587), `ssl` (465) или `none`. Без `SMTP_HOST` коды пишутся в лог приложения |
+| `SMTP_PASSWORD` | Переменная, защищённая | пароль SMTP (для Яндекса/Mail.ru — пароль приложения) |
 | `DEPLOY_USER`, `APP_PORT`, `POSTGRES_USER`, `POSTGRES_DB`, `CORS_ORIGIN` | Переменная, необязательно | по умолчанию `root`, `8080`, `petcare`, `petcare`, `http://localhost` |
 
 На ВМ всё лежит в `~/app` (`docker-compose.yml`, `sql/`, `.env`). Миграции из `sql/` применяются только при первом создании тома `pgdata`.

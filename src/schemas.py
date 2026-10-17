@@ -15,11 +15,21 @@ class User(BaseModel):
     email: str
     phone_number: str | None
     name: str
+    email_verified: bool
 
 
 class LoginIn(BaseModel):
     email: str
     passwd: str
+
+
+class EmailIn(BaseModel):
+    email: str
+
+
+class EmailCodeIn(BaseModel):
+    email: str
+    code: str
 
 
 class Token(BaseModel):
@@ -29,6 +39,8 @@ class Token(BaseModel):
 
 class PetIn(BaseModel):
     name: str
+    type: str | None = None
+    breed: str | None = None
     own_ids: list[int] = []
     prop_ids: list[int] = []
 

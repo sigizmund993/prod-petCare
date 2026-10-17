@@ -11,7 +11,7 @@ router = APIRouter(prefix="/pet", tags=["pet"])
 @router.post("/add", response_model=Pet, status_code=status.HTTP_201_CREATED)
 def pet_add(pet: PetIn, user_id: int = Depends(current_user_id)):
     try:
-        return queries.create_pet(user_id, pet.name, with_owner(pet.own_ids, user_id), pet.prop_ids)
+        return queries.create_pet(user_id, pet.name, pet.type, pet.breed, with_owner(pet.own_ids, user_id), pet.prop_ids)
     except queries.InvalidRefs as e:
         bad_request(str(e))
 
@@ -25,7 +25,7 @@ def pet_del(pet_id: int, user_id: int = Depends(current_user_id)):
 @router.put("/edit", response_model=Pet)
 def pet_edit(pet_id: int, pet: PetIn, user_id: int = Depends(current_user_id)):
     try:
-        updated = queries.update_pet(pet_id, user_id, pet.name, with_owner(pet.own_ids, user_id), pet.prop_ids)
+        updated = queries.update_pet(pet_id, user_id, pet.name, pet.type, pet.breed, with_owner(pet.own_ids, user_id), pet.prop_ids)
     except queries.InvalidRefs as e:
         bad_request(str(e))
     if updated is None:

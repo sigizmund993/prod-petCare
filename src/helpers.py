@@ -1,8 +1,11 @@
 import hashlib
 import hmac
 import os
+import secrets
 
 from fastapi import HTTPException, status
+
+from src import config
 
 
 def not_found(entity: str):
@@ -23,6 +26,15 @@ def verify_password(password: str, stored: str) -> bool:
     salt_hex, digest_hex = stored.split("$")
     digest = hashlib.scrypt(password.encode(), salt=bytes.fromhex(salt_hex), n=2**14, r=8, p=1)
     return hmac.compare_digest(digest.hex(), digest_hex)
+
+
+def new_email_code() -> str:
+    return f"{secrets.randbelow(10**6):06d}"
+
+
+def hash_email_code(user_id: int, code: str) -> str:
+    # Код короткий, поэтому хэшируем с секретом: по утёкшей БД его не подобрать
+    return hmac.new(config.JWT_SECRET.encode(), f"{user_id}:{code}".encode(), hashlib.sha256).hexdigest()
 
 
 def with_owner(own_ids: list[int], user_id: int) -> list[int]:
