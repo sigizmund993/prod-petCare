@@ -1,9 +1,10 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import Response
 
-from db import db
+from db import queries
+from src.auth import current_user_id
 
-router = APIRouter()
+router = APIRouter(tags=["photo"])
 
 MAX_SIZE = 5 * 1024 * 1024  # 5 МБ
 
@@ -32,17 +33,15 @@ def is_valid_image(content: bytes, content_type: str) -> bool:
     return False
 
 
+# Фото хранится в самой строке питомца (pets.picture, BYTEA), по одному на питомца.
+# Работать с фото может только владелец питомца; на чужого питомца ответ — 404.
+
 @router.post("/pets/{pet_id}/photo")
-async def upload_pet_photo(
+def upload_pet_photo(
     pet_id: int,
     file: UploadFile = File(...),
+    user_id: int = Depends(current_user_id),
 ):
-    if pet_id <= 0:
-        raise HTTPException(
-            status_code=400,
-            detail="Некорректный ID питомца",
-        )
-
     content_type = file.content_type or ""
 
     if content_type not in ALLOWED_TYPES:
@@ -51,8 +50,7 @@ async def upload_pet_photo(
             detail="Разрешены только JPG, PNG и WEBP",
         )
 
-    content = await file.read(MAX_SIZE + 1)
-    await file.close()
+    content = file.file.read(MAX_SIZE + 1)
 
     if not content:
         raise HTTPException(
@@ -72,108 +70,48 @@ async def upload_pet_photo(
             detail="Содержимое файла не соответствует формату изображения",
         )
 
-    if db.pool is None:
-        raise HTTPException(
-            status_code=503,
-            detail="Нет подключения к базе данных",
-        )
-
-    try:
-        with db.pool.connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT id FROM pets WHERE id = %s",
-                    (pet_id,),
-                )
-
-                if cur.fetchone() is None:
-                    raise HTTPException(
-                        status_code=404,
-                        detail="Питомец не найден",
-                    )
-
-                cur.execute(
-                    """
-                    INSERT INTO pet_photos
-                        (pet_id, photo_data, content_type, photo_url)
-                    VALUES (%s, %s, %s, NULL)
-                    RETURNING id, pet_id, is_main, created_at
-                    """,
-                    (pet_id, content, content_type),
-                )
-
-                photo = cur.fetchone()
-
-            conn.commit()
-
-        return {
-            "id": photo["id"],
-            "pet_id": photo["pet_id"],
-            "is_main": photo["is_main"],
-            "created_at": photo["created_at"],
-            "photo_url": f"/pets/photos/{photo['id']}",
-            "message": "Фотография сохранена в PostgreSQL",
-        }
-
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(
-            status_code=500,
-            detail="Не удалось сохранить фотографию",
-        ) from exc
-
-
-@router.get("/pets/photos/{photo_id}")
-def get_pet_photo(photo_id: int):
-    """Возвращает изображение непосредственно из PostgreSQL."""
-    if photo_id <= 0:
-        raise HTTPException(
-            status_code=400,
-            detail="Некорректный ID фотографии",
-        )
-
-    if db.pool is None:
-        raise HTTPException(
-            status_code=503,
-            detail="Нет подключения к базе данных",
-        )
-
-    try:
-        with db.pool.connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT photo_data, content_type
-                    FROM pet_photos
-                    WHERE id = %s
-                    """,
-                    (photo_id,),
-                )
-                photo = cur.fetchone()
-
-    except Exception as exc:
-        raise HTTPException(
-            status_code=500,
-            detail="Не удалось получить фотографию",
-        ) from exc
-
-    if photo is None or photo["photo_data"] is None:
+    # Новое фото заменяет предыдущее
+    if not queries.set_pet_picture(pet_id, user_id, content, content_type):
         raise HTTPException(
             status_code=404,
-            detail="Фотография не найдена или ещё не хранится в BYTEA",
+            detail="Питомец не найден",
         )
 
-    content_type = photo["content_type"]
+    return {
+        "pet_id": pet_id,
+        "photo_url": f"/pets/{pet_id}/photo",
+    }
 
-    if content_type not in ALLOWED_TYPES:
+
+@router.get(
+    "/pets/{pet_id}/photo",
+    response_class=Response,
+    responses={200: {"content": {"image/*": {}}}},
+)
+def get_pet_photo(pet_id: int, user_id: int = Depends(current_user_id)):
+    """Возвращает изображение непосредственно из PostgreSQL."""
+    photo = queries.get_pet_picture(pet_id, user_id)
+
+    if photo is None:
         raise HTTPException(
-            status_code=500,
-            detail="Неизвестный формат фотографии",
+            status_code=404,
+            detail="Фотография не найдена",
         )
 
     return Response(
-        content=bytes(photo["photo_data"]),
-        media_type=content_type,
-        headers={"X-Content-Type-Options": "nosniff"},
+        content=bytes(photo["picture"]),
+        media_type=photo["picture_type"],
+        headers={
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": "private, no-cache",
+        },
     )
+
+
+@router.delete("/pets/{pet_id}/photo", status_code=status.HTTP_204_NO_CONTENT)
+def delete_pet_photo(pet_id: int, user_id: int = Depends(current_user_id)):
+    if not queries.set_pet_picture(pet_id, user_id, None, None):
+        raise HTTPException(
+            status_code=404,
+            detail="Питомец не найден",
+        )

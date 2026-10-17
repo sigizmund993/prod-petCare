@@ -107,9 +107,9 @@ deploy:vm:
       SMTP_FROM=$SMTP_FROM
       SMTP_TLS=$SMTP_TLS
       EOF
-    # кладём на ВМ compose-файл, миграции, .env и ключ сервис-аккаунта
+    # кладём на ВМ compose-файл, .env и ключ сервис-аккаунта (миграции из sql/ лежат в образе и применяются при старте)
     - $SSH $VM "mkdir -p ~/app"
-    - $SCP -r deploy/docker-compose.yml sql $SPIRIT_DOCKER_SA_KEY $VM:app/
+    - $SCP deploy/docker-compose.yml $SPIRIT_DOCKER_SA_KEY $VM:app/
     - $SCP deploy.env $VM:app/.env
     - rm -f deploy.env
     # на ВМ: входим в registry, скачиваем новый образ и перезапускаем.

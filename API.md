@@ -66,10 +66,12 @@ POST /user/add  ──►  на почту приходит 6-значный к�
   "type": "кошка",
   "breed": "британская",
   "own_ids": [1, 2],
-  "prop_ids": [5, 7]
+  "prop_ids": [5, 7],
+  "has_picture": true
 }
 ```
 - `type` — вид животного, `breed` — порода; обе строки необязательны (`null`).
+- `has_picture` — загружена ли картинка. Саму картинку отдаёт `GET /pets/{pet_id}/photo`, в `Pet` её нет. Только для чтения: в `PetIn` не передаётся.
 - `own_ids` — id пользователей-владельцев.
 - `prop_ids` — id записей (Prop), привязанных к питомцу.
 
@@ -146,6 +148,9 @@ POST /user/add  ──►  на почту приходит 6-значный к�
 | GET | `/pet/get?pet_id=1` | — | 200 `Pet` |
 | PUT | `/pet/edit?pet_id=1` | `PetIn` | 200 `Pet` |
 | DELETE | `/pet/del?pet_id=1` | — | 204 |
+| POST | `/pets/1/photo` | `multipart/form-data`, поле `file` | 200 `{"pet_id": 1, "photo_url": "/pets/1/photo"}` |
+| GET | `/pets/1/photo` | — | 200, байты картинки (404, если её нет) |
+| DELETE | `/pets/1/photo` | — | 204 |
 
 Все ручки требуют авторизации.
 
@@ -154,6 +159,33 @@ POST /user/add  ──►  на почту приходит 6-значный к�
 { "name": "Барсик", "type": "кошка", "breed": "британская", "own_ids": [2], "prop_ids": [5] }
 ```
 Обязательно только `name`. `type` и `breed` по умолчанию `null`, `own_ids` и `prop_ids` — `[]`.
+
+#### Фото питомца
+
+Обратите внимание: у ручек фото **другая схема URL**, чем у остальных: `/pets/{pet_id}/photo` (id в пути, `pets` во множественном числе).
+
+- У питомца одно фото. Новая загрузка заменяет старое, `PUT /pet/edit` фото не трогает.
+- Форматы: **JPEG, PNG, WebP**, до **5 МБ**. Проверяется и `Content-Type` файла, и его содержимое. Иначе будет 400, слишком большой файл — 413.
+- `GET /pets/{pet_id}/photo` требует токен, поэтому `<img src="/pets/1/photo">` напрямую **не сработает**: браузер не отправит заголовок `Authorization`. Загрузите картинку через `fetch` и покажите её через blob URL:
+
+```js
+// загрузка
+const form = new FormData();
+form.append("file", fileInput.files[0]);
+await fetch(`${API}/pets/${petId}/photo`, {
+  method: "POST",
+  headers: { Authorization: `Bearer ${token}` }, // Content-Type не ставить: браузер сам добавит boundary
+  body: form,
+});
+
+// показ
+if (pet.has_picture) {
+  const res = await fetch(`${API}/pets/${pet.id}/photo`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  img.src = URL.createObjectURL(await res.blob());
+}
+```
 
 ### Prop
 

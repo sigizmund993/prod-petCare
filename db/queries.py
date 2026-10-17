@@ -5,7 +5,7 @@ from psycopg import Connection
 from db import db
 
 USER_COLUMNS = "id, email, phone_number, name, email_verified"
-PET_COLUMNS = "id, name, type, breed, own_ids, prop_ids"
+PET_COLUMNS = "id, name, type, breed, own_ids, prop_ids, picture IS NOT NULL AS has_picture"
 PROP_COLUMNS = "id, name, msg, text, rep, date, own_ids"
 
 
@@ -152,6 +152,23 @@ def update_pet(pet_id: int, user_id: int, name: str, type: str | None, breed: st
         return conn.execute(
             f"UPDATE pets SET name = %s, type = %s, breed = %s, own_ids = %s, prop_ids = %s WHERE id = %s AND %s = ANY(own_ids) RETURNING {PET_COLUMNS}",
             (name, type, breed, own_ids, prop_ids, pet_id, user_id),
+        ).fetchone()
+
+
+def set_pet_picture(pet_id: int, user_id: int, picture: bytes | None, picture_type: str | None) -> bool:
+    # picture=None удаляет картинку; False — питомца нет или он чужой
+    with db.pool.connection() as conn:
+        return conn.execute(
+            "UPDATE pets SET picture = %s, picture_type = %s WHERE id = %s AND %s = ANY(own_ids)",
+            (picture, picture_type, pet_id, user_id),
+        ).rowcount > 0
+
+
+def get_pet_picture(pet_id: int, user_id: int) -> dict | None:
+    with db.pool.connection() as conn:
+        return conn.execute(
+            "SELECT picture, picture_type FROM pets WHERE id = %s AND %s = ANY(own_ids) AND picture IS NOT NULL",
+            (pet_id, user_id),
         ).fetchone()
 
 

@@ -53,6 +53,7 @@ class PetIn(BaseModel):
 
 class Pet(PetIn):
     id: int
+    has_picture: bool
 
 
 class PropIn(BaseModel):
