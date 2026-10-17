@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from db import db
 from src import config
+from src.handlers_notification import router as notification_router
 from src.handlers_pet import router as pet_router
 from src.handlers_prop import router as prop_router
 from src.handlers_user import router as user_router
@@ -30,3 +31,4 @@ app.add_middleware(
 app.include_router(user_router)
 app.include_router(pet_router)
 app.include_router(prop_router)
+app.include_router(notification_router)

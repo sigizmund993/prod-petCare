@@ -218,3 +218,45 @@ def delete_prop(prop_id: int, user_id: int) -> bool:
         if deleted:
             conn.execute("UPDATE pets SET prop_ids = array_remove(prop_ids, %s) WHERE %s = ANY(prop_ids)", (prop_id, prop_id))
         return deleted > 0
+
+
+# ---------- уведомления ----------
+
+# Последнее наступившее срабатывание записи: повторяющиеся срабатывают каждый день начиная с date
+_OCCURRENCE = (
+    "CASE WHEN p.rep AND p.date <= now() "
+    "THEN p.date + make_interval(days => floor(extract(epoch FROM now() - p.date) / 86400)::int) "
+    "ELSE p.date END"
+)
+
+_DUE_PROPS = f"""
+    SELECT p.id, p.name, p.msg, p.text, p.rep, {_OCCURRENCE} AS date, p.own_ids
+    FROM props p
+    LEFT JOIN notification_reads r ON r.prop_id = p.id AND r.user_id = %(user_id)s
+    WHERE %(user_id)s = ANY(p.own_ids) AND p.date <= now()
+      AND (r.read_date IS NULL OR r.read_date < {_OCCURRENCE})
+"""
+
+
+def list_notifications(user_id: int) -> list[dict]:
+    with db.pool.connection() as conn:
+        return conn.execute(f"{_DUE_PROPS} ORDER BY date DESC", {"user_id": user_id}).fetchall()
+
+
+def count_notifications(user_id: int) -> int:
+    with db.pool.connection() as conn:
+        return conn.execute(f"SELECT count(*) AS n FROM ({_DUE_PROPS}) due", {"user_id": user_id}).fetchone()["n"]
+
+
+def read_notifications(user_id: int, prop_id: int | None = None) -> int:
+    # Отмечает прочитанными наступившие уведомления (одно или все); возвращает их количество
+    with db.pool.connection() as conn:
+        return conn.execute(
+            f"""
+            INSERT INTO notification_reads (user_id, prop_id, read_date)
+            SELECT %(user_id)s, id, date FROM ({_DUE_PROPS}) due
+            WHERE %(prop_id)s::bigint IS NULL OR id = %(prop_id)s
+            ON CONFLICT (user_id, prop_id) DO UPDATE SET read_date = EXCLUDED.read_date
+            """,
+            {"user_id": user_id, "prop_id": prop_id},
+        ).rowcount
