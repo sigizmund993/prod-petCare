@@ -15,6 +15,8 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    labels:
+      sage.logs: "true"
     restart: unless-stopped
 
   app:
@@ -39,6 +41,24 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    labels:
+      sage.logs: "true"
+    restart: unless-stopped
+
+  # Отправка логов app и db в Sage. Запускается, только если включён профиль sage:
+  # deploy:vm включает его, когда задана CI-переменная SAGE_TOKEN
+  vector:
+    image: timberio/vector:0.59.0-alpine
+    profiles: ["sage"]
+    command: ["--config", "/etc/vector/vector.yaml", "--dangerously-allow-env-var-interpolation"]
+    environment:
+      - SAGE_GROUP=${SAGE_GROUP:-hack-led-19}
+      - SAGE_TOKEN=${SAGE_TOKEN:-}
+      - SAGE_ENV=${SAGE_ENV:-prod}
+      - SAGE_INST=${SAGE_INST:-petcare-vm}
+    volumes:
+      - ./vector.yaml:/etc/vector/vector.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     restart: unless-stopped
 
 volumes:

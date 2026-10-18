@@ -11,7 +11,7 @@ stages:
   - build
   - deploy
 
-# Секреты (SPIRIT_DOCKER_SA_KEY, DEPLOY_KEY, POSTGRES_PASSWORD, JWT_SECRET) задаются в Spirit, а не в GitLab-e:
+# Секреты (SPIRIT_DOCKER_SA_KEY, DEPLOY_KEY, POSTGRES_PASSWORD, JWT_SECRET, SAGE_TOKEN) задаются в Spirit, а не в GitLab-e:
 # Код → Репозитории → ваш репозиторий → вкладка CI-переменные.
 # Переменная репозитория приоритетнее значения в этом файле, поэтому всё,
 # что задано ниже, можно переопределить из Spirit без правки файла.
@@ -44,6 +44,10 @@ variables:
   SMTP_TLS: starttls
   # Telegram-бот для уведомлений. TELEGRAM_BOT_TOKEN — только в Spirit. Без него бот выключен
   TELEGRAM_BOT_USERNAME: ""
+  # Логи в Sage (https://sage.spirit.t-education.com). Включаются, только если в Spirit задан SAGE_TOKEN
+  # (сервисный токен Sage, защищённая переменная). Поиск в Sage: group="hack-led-19" env="prod"
+  SAGE_GROUP: hack-led-19
+  SAGE_ENV: prod
 
 # 0. Проверки: линтер и тесты. Если они упали, образ не собирается и деплоя не будет
 .python_job:
@@ -156,10 +160,15 @@ deploy:vm:
       SMTP_TLS=$SMTP_TLS
       TELEGRAM_BOT_TOKEN=$TELEGRAM_BOT_TOKEN
       TELEGRAM_BOT_USERNAME=$TELEGRAM_BOT_USERNAME
+      COMPOSE_PROFILES=${SAGE_TOKEN:+sage}
+      SAGE_GROUP=$SAGE_GROUP
+      SAGE_TOKEN=$SAGE_TOKEN
+      SAGE_ENV=$SAGE_ENV
+      SAGE_INST=$DEPLOY_HOST
       EOF
-    # кладём на ВМ compose-файл, .env и ключ сервис-аккаунта (миграции из sql/ лежат в образе и применяются при старте)
+    # кладём на ВМ compose-файл, конфиг Vector, .env и ключ сервис-аккаунта (миграции из sql/ лежат в образе и применяются при старте)
     - $SSH $VM "mkdir -p ~/app"
-    - $SCP deploy/docker-compose.yml $SPIRIT_DOCKER_SA_KEY $VM:app/
+    - $SCP deploy/docker-compose.yml deploy/vector.yaml $SPIRIT_DOCKER_SA_KEY $VM:app/
     - $SCP deploy.env $VM:app/.env
     - rm -f deploy.env
     # на ВМ: входим в registry, скачиваем новый образ и перезапускаем.

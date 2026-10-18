@@ -1,0 +1,73 @@
+# Отправка логов контейнеров app и db в Sage (Logs Collector).
+# Vector запускается с --dangerously-allow-env-var-interpolation и подставляет переменные окружения
+# во весь файл, включая комментарии, поэтому знак доллара используем только для подстановки
+sources:
+  docker:
+    type: docker_logs
+    # Только контейнеры с этим лейблом (см. docker-compose.yml), чтобы не отправлять логи самого Vector
+    include_labels: ["sage.logs=true"]
+    # Склеиваем многострочные записи (traceback Python) в одну: новая запись начинается
+    # с уровня uvicorn (INFO:, ERROR: ...) или с даты, как у postgres
+    multiline:
+      mode: halt_before
+      start_pattern: '^(DEBUG|INFO|WARNING|ERROR|CRITICAL):|^\d{4}-\d{2}-\d{2} '
+      condition_pattern: '^(DEBUG|INFO|WARNING|ERROR|CRITICAL):|^\d{4}-\d{2}-\d{2} '
+      timeout_ms: 1000
+
+transforms:
+  format:
+    type: remap
+    inputs: ["docker"]
+    source: |
+      raw = string(.message) ?? ""
+      # Секреты, которые могут оказаться в логе, в Sage не отправляем: коды подтверждения почты
+      # (пишутся в лог, если не настроен SMTP) и токен бота из URL Telegram API
+      raw = replace(raw, r'код подтверждения: \d+', "код подтверждения: ******")
+      raw = replace(raw, r'bot\d+:[A-Za-z0-9_-]+', "bot******")
+
+      service = string(.label."com.docker.compose.service") ?? "unknown"
+
+      level = "UNDEFINED"
+      m = parse_regex(raw, r'^(?P<lvl>DEBUG|INFO|WARNING|ERROR|CRITICAL):') ??
+          parse_regex(raw, r'\b(?P<lvl>LOG|INFO|NOTICE|WARNING|ERROR|FATAL|PANIC|DEBUG\d?):  ') ??
+          {}
+      lvl = string(m.lvl) ?? ""
+      if lvl == "WARNING" { level = "WARN" }
+      else if lvl == "LOG" || lvl == "NOTICE" { level = "INFO" }
+      else if lvl == "PANIC" { level = "FATAL" }
+      else if starts_with(lvl, "DEBUG") { level = "DEBUG" }
+      else if lvl != "" { level = lvl }
+
+      . = {
+        "@timestamp": format_timestamp!(.timestamp, format: "%Y-%m-%dT%H:%M:%S%.6fZ", timezone: "UTC"),
+        "env": "${SAGE_ENV}",
+        "system": "petcare-" + service,
+        "inst": "${SAGE_INST}",
+        "level": level,
+        "message": raw,
+        "stream": .stream,
+        "container": .container_name,
+        "image": .image,
+      }
+
+sinks:
+  sage:
+    type: http
+    inputs: ["format"]
+    # Хост указан явно: Vector не разрешает брать его из переменной
+    uri: "https://sage.spirit.t-education.com/api/${SAGE_GROUP}/multiline/"
+    method: post
+    compression: gzip
+    encoding:
+      codec: json
+    framing:
+      method: newline_delimited
+    batch:
+      max_events: 100
+      timeout_secs: 1
+    request:
+      headers:
+        Authorization: "JWT ${SAGE_TOKEN}"
+    # Logs Collector не отвечает на проверочный запрос, ошибки видно по логам Vector
+    healthcheck:
+      enabled: false
