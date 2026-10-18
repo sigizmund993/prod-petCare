@@ -113,6 +113,9 @@ POST /user/add  ──►  на почту приходит 6-значный к�
   - `suitable` — подошло (`true`) / не подошло (`false`) / не оценено (`null`);
   - `reactions` — нежелательные реакции: `gi` (ЖКТ), `allergy` (аллергия), `other`. Повторы убираются.
 - Записи `food` никогда не становятся уведомлениями — это история питания, а не напоминания.
+- Только для `category: "vet_visit"` (для других типов — 422) — рекомендации врача, по ним работают [рекомендации](#recommendation):
+  - `diet_tags` — что рекомендовано: `hypoallergenic`, `sensitive_digestion`, `weight_control`, `sterilised`, `urinary`, `renal`, `dental`, `joint`, `hairball`, `skin_coat`, `long_coat`, `brachycephalic`, `active`, `intellectual`, `chewer`;
+  - `diet_exclude` — каких ингредиентов избегать: `chicken`, `turkey`, `beef`, `lamb`, `fish`, `grain`, `rice`, `dairy`.
 
 ### Доступ и владельцы
 - Пользователь видит только тех питомцев и те записи, где его `id` есть в `own_ids`. На чужие объекты API отвечает 404.
@@ -375,6 +378,35 @@ messages.push(...await api(`/message/list?community_id=${id}&after_id=${lastId}`
 const older = await api(`/message/list?community_id=${id}&before_id=${messages[0].id}`, { token });
 messages = [...older, ...messages];
 ```
+
+### Recommendation
+
+Подбор для питомца по виду, возрасту, породе, рекомендациям врача (последний визит `vet_visit` с `diet_tags`/`diet_exclude`) и истории кормов. Вид берётся из `pet.type` (`кошка`, `кот`, `котёнок`, `собака`, `щенок` …), порода — из `pet.breed`, возраст — из `pet.birth_date`.
+
+| Метод | Путь | Ответ |
+|---|---|---|
+| GET | `/recommendation/food?pet_id=1` | 200 `Recommendation[]` — корма |
+| GET | `/recommendation/goods?pet_id=1` | 200 `Recommendation[]` — игрушки, аксессуары и уход |
+| GET | `/recommendation/goods?pet_id=1&kind=toy` | только игрушки; `kind`: `toy`, `accessory`, `care` |
+
+Параметр `limit` — сколько вернуть, 1–50, по умолчанию 10. Ошибки: 404 — питомец чужой или не найден; 400 `Pet type must be cat or dog for recommendations` — не указан или не распознан вид питомца (попросите указать «кошка» или «собака»).
+
+```json
+[
+  {
+    "id": 4,
+    "kind": "food",
+    "name": "Гипоаллергенный корм с ягнёнком для кошек",
+    "description": "Один источник белка, без злаков",
+    "tags": ["hypoallergenic", "skin_coat"],
+    "ingredients": ["lamb"],
+    "score": 3,
+    "reasons": ["рекомендовано ветеринаром: гипоаллергенный", "без исключённого врачом: курица"]
+  }
+]
+```
+
+Отсортировано по `score`. `reasons` — готовые подписи для интерфейса: почему товар предложен. Корма, которые не подошли или вызвали аллергию, и корма с аллергенами из них в выдачу не попадают. Рядом с рекомендациями стоит показать «Не заменяет консультацию ветеринара».
 
 ## Пример
 

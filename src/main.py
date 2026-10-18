@@ -12,6 +12,7 @@ from src.handlers_message import router as message_router
 from src.handlers_notification import router as notification_router
 from src.handlers_pet import router as pet_router
 from src.handlers_prop import router as prop_router
+from src.handlers_recommendation import router as recommendation_router
 from src.handlers_user import router as user_router
 
 
@@ -41,3 +42,4 @@ app.include_router(photo_router)
 app.include_router(notification_router)
 app.include_router(community_router)
 app.include_router(message_router)
+app.include_router(recommendation_router)

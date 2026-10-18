@@ -69,6 +69,12 @@ class Pet(PetIn):
 PropCategory = Literal["reminder", "food", "vaccination", "parasites", "vet_visit", "medication"]
 # gi — проблемы с ЖКТ, allergy — аллергическая реакция
 Reaction = Literal["gi", "allergy", "other"]
+# Свойства товаров, которые может рекомендовать врач (подписи — в src/recommendations.py)
+DietTag = Literal[
+    "hypoallergenic", "sensitive_digestion", "weight_control", "sterilised", "urinary", "renal", "dental",
+    "joint", "hairball", "skin_coat", "long_coat", "brachycephalic", "active", "intellectual", "chewer",
+]
+Ingredient = Literal["chicken", "turkey", "beef", "lamb", "fish", "grain", "rice", "dairy"]
 
 
 class PropIn(BaseModel):
@@ -83,16 +89,21 @@ class PropIn(BaseModel):
     liked: bool | None = None
     suitable: bool | None = None
     reactions: list[Reaction] = []
+    # Только для category = "vet_visit": что врач рекомендовал и каких ингредиентов избегать
+    diet_tags: list[DietTag] = []
+    diet_exclude: list[Ingredient] = []
 
-    @field_validator("reactions")
+    @field_validator("reactions", "diet_tags", "diet_exclude")
     @classmethod
-    def unique_reactions(cls, v: list[str]) -> list[str]:
+    def unique_items(cls, v: list[str]) -> list[str]:
         return list(dict.fromkeys(v))
 
     @model_validator(mode="after")
     def food_fields_only_for_food(self):
         if self.category != "food" and (self.liked is not None or self.suitable is not None or self.reactions):
             raise ValueError("liked, suitable and reactions are only allowed for category food")
+        if self.category != "vet_visit" and (self.diet_tags or self.diet_exclude):
+            raise ValueError("diet_tags and diet_exclude are only allowed for category vet_visit")
         return self
 
 
@@ -145,3 +156,15 @@ class Message(MessageIn):
     from_name: str | None
     created_at: datetime
     edited_at: datetime | None
+
+
+class Recommendation(BaseModel):
+    id: int
+    kind: Literal["food", "toy", "accessory", "care"]
+    name: str
+    description: str | None
+    tags: list[str]
+    ingredients: list[str]
+    score: int
+    # Почему товар предложен: рекомендации врача, порода, история питания, возраст
+    reasons: list[str]
