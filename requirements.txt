@@ -4,6 +4,4 @@ uvicorn[standard]>=0.32
 psycopg[binary]>=3.2
 psycopg-pool>=3.2
 pyjwt>=2.9
-httpx>=0.27
-tzdata
 python-multipart>=0.0.9

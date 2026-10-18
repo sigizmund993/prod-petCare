@@ -39,8 +39,8 @@ POST /user/add  ──►  на почту приходит 6-значный к�
 |---|---|
 | 400 | неверные ссылки (`Unknown user in own_ids`, `Unknown prop in prop_ids`), неверный или просроченный код |
 | 401 | нет токена, токен неверный или просрочен (без заголовка `Authorization` может прийти 403 `Not authenticated`) |
-| 403 | `Email not verified` при логине; в сообществах — нет прав (`Not a member`, `Only the owner can do this` и т.п.) |
-| 404 | объект не найден **или чужой** (`User not found`, `Pet not found`, `Prop not found`, `Notification not found`, `Community not found`, `Message not found`, `Member not found`) |
+| 403 | `Email not verified` при логине |
+| 404 | объект не найден **или чужой** (`User not found`, `Pet not found`, `Prop not found`, `Notification not found`) |
 | 409 | `Email already registered` или `Phone number already registered` |
 | 422 | тело или параметры не прошли валидацию; `detail` в этом случае — массив с описанием полей |
 
@@ -53,11 +53,10 @@ POST /user/add  ──►  на почту приходит 6-значный к�
   "email": "user@example.com",
   "phone_number": "+79990000000",
   "name": "Иван",
-  "email_verified": true,
-  "telegram_linked": false
+  "email_verified": true
 }
 ```
-`phone_number` может быть `null`. `telegram_linked` — подключены ли уведомления в Telegram.
+`phone_number` может быть `null`.
 
 ### Pet
 ```json
@@ -114,9 +113,6 @@ POST /user/add  ──►  на почту приходит 6-значный к�
   - `suitable` — подошло (`true`) / не подошло (`false`) / не оценено (`null`);
   - `reactions` — нежелательные реакции: `gi` (ЖКТ), `allergy` (аллергия), `other`. Повторы убираются.
 - Записи `food` никогда не становятся уведомлениями — это история питания, а не напоминания.
-- Только для `category: "vet_visit"` (для других типов — 422) — рекомендации врача, по ним работают [рекомендации](#recommendation):
-  - `diet_tags` — что рекомендовано: `hypoallergenic`, `sensitive_digestion`, `weight_control`, `sterilised`, `urinary`, `renal`, `dental`, `joint`, `hairball`, `skin_coat`, `long_coat`, `brachycephalic`, `active`, `intellectual`, `chewer`;
-  - `diet_exclude` — каких ингредиентов избегать: `chicken`, `turkey`, `beef`, `lamb`, `fish`, `grain`, `rice`, `dairy`.
 
 ### Доступ и владельцы
 - Пользователь видит только тех питомцев и те записи, где его `id` есть в `own_ids`. На чужие объекты API отвечает 404.
@@ -142,8 +138,6 @@ POST /user/add  ──►  на почту приходит 6-значный к�
 | GET | `/user/me` | да | — | 200 `User` |
 | PUT | `/user/edit` | да | `UserIn` | 200 `User` |
 | DELETE | `/user/del` | да | — | 204 |
-| POST | `/user/telegram/link` | да | — | 200 `{"url", "expires_in"}` |
-| DELETE | `/user/telegram` | да | — | 204 |
 
 `UserIn`:
 ```json
@@ -166,16 +160,6 @@ POST /user/add  ──►  на почту приходит 6-значный к�
 - `/user/verify/resend` всегда отвечает 204, даже если почта не зарегистрирована или уже подтверждена. Показывайте нейтральное «если адрес зарегистрирован, мы отправили код».
 - `/user/verify` на любую проблему с кодом (неверный, просрочен, попытки кончились) отвечает 400 `Wrong or expired code`. Предложите отправить код ещё раз.
 - `DELETE /user/del` убирает пользователя из всех `own_ids`. Питомцы и записи, у которых не осталось владельцев, удаляются.
-
-### Telegram
-
-1. По кнопке «Подключить Telegram» вызовите `POST /user/telegram/link` и откройте `url` в новой вкладке. Ссылка одноразовая и живёт `expires_in` секунд.
-2. Пользователь жмёт Start в боте, и аккаунт привязывается. Обновите `GET /user/me`: `telegram_linked` станет `true`.
-3. `DELETE /user/telegram` отключает уведомления.
-
-Если бот на сервере не настроен, `POST /user/telegram/link` отвечает 503 `Telegram is not configured`.
-
-В Telegram приходят те же уведомления, что в `/notification/list`: запись с наступившей `date` (повторяющиеся — каждый день) и день рождения питомца (в 9:00 по Москве). Уже прочитанные на сайте и наступившие до подключения Telegram не приходят. Прочтение в Telegram на сайт не влияет: уведомление остаётся непрочитанным, пока его не прочитают на сайте.
 
 ### Pet
 
@@ -307,119 +291,6 @@ if (pet.has_picture) {
 `read` принимает ровно один из `prop_id`/`pet_id` (иначе 400) и отвечает 404, если такого непрочитанного уведомления нет. Удобно брать параметр по `kind`: `kind === "birthday" ? {pet_id: n.id} : {prop_id: n.id}`.
 
 Все ручки требуют авторизации. Новые уведомления сервер не присылает сам: опрашивайте `/notification/count` раз в 30–60 секунд и при открытии приложения.
-
-### Community
-
-Сообщества **открытые**: список, карточку и участников видит любой пользователь, вступить и выйти можно самому. Читать и писать сообщения могут только участники.
-
-```json
-{
-  "id": 1,
-  "name": "Любители котов",
-  "description": "Всё о котах",
-  "owner_id": 1,
-  "member_ids": [1, 2],
-  "created_at": "2026-10-18T12:00:00Z"
-}
-```
-- `owner_id` — владелец: только он меняет название и описание, удаляет сообщество и выгоняет участников.
-- `member_ids` — участники в порядке вступления, владелец среди них. «Я участник» — `member_ids.includes(me.id)`.
-
-| Метод | Путь | Тело | Ответ |
-|---|---|---|---|
-| POST | `/community/add` | `CommunityIn` | 201 `Community` — создатель становится владельцем и участником |
-| GET | `/community/list` | — | 200 `Community[]` — все сообщества, по `id` |
-| GET | `/community/list?q=кот` | — | 200 `Community[]` — поиск по подстроке названия, без учёта регистра |
-| GET | `/community/list?mine=true` | — | 200 `Community[]` — только мои (можно вместе с `q`) |
-| GET | `/community/get?community_id=1` | — | 200 `Community` |
-| PUT | `/community/edit?community_id=1` | `CommunityIn` | 200 `Community` — только владелец |
-| DELETE | `/community/del?community_id=1` | — | 204 — только владелец, сообщения удаляются вместе с ним |
-| POST | `/community/join?community_id=1` | — | 200 `Community` — повторное вступление ничего не меняет |
-| POST | `/community/leave?community_id=1` | — | 204 (403, если вы не участник) |
-| POST | `/community/kick?community_id=1&member_id=2` | — | 204 — только владелец; себя — 400, не участник — 404 |
-| GET | `/community/members?community_id=1` | — | 200 `[{"id": 1, "name": "Иван"}]` — в порядке вступления |
-
-Все ручки требуют авторизации.
-
-`CommunityIn`:
-```json
-{ "name": "Любители котов", "description": "Всё о котах" }
-```
-`name` обязателен, от 1 до 100 символов (пробелы по краям обрезаются, пустое — 422). `description` необязательно (`null`).
-
-- Если владелец выходит из сообщества или удаляет аккаунт, владельцем становится первый из оставшихся участников (`member_ids[0]`). Сообщество без участников удаляется.
-- `members` отдаёт только `id` и имя: почту и телефон других пользователей API не показывает. Удобно, чтобы показать список участников и имена в сообщениях.
-
-### Message
-
-```json
-{
-  "id": 10,
-  "text": "Чем вы кормите британцев?",
-  "community_id": 1,
-  "from_id": 2,
-  "from_name": "Иван",
-  "created_at": "2026-10-18T12:05:00Z",
-  "edited_at": null
-}
-```
-- `from_id` и `from_name` — автор. Оба `null`, если автор удалил аккаунт: покажите «Удалённый пользователь».
-- `edited_at` — время последнего редактирования, `null` — сообщение не меняли (можно показать «изменено»).
-
-| Метод | Путь | Тело | Ответ |
-|---|---|---|---|
-| POST | `/message/add?community_id=1` | `{"text"}` | 201 `Message` — только участник |
-| GET | `/message/list?community_id=1` | — | 200 `Message[]` — последние 50 |
-| GET | `/message/list?community_id=1&before_id=10` | — | 200 `Message[]` — 50 сообщений перед `id = 10` (подгрузка истории) |
-| GET | `/message/list?community_id=1&after_id=42` | — | 200 `Message[]` — новые после `id = 42` (опрос) |
-| PUT | `/message/edit?message_id=10` | `{"text"}` | 200 `Message` — только автор |
-| DELETE | `/message/del?message_id=10` | — | 204 — автор или владелец сообщества |
-
-Все ручки требуют авторизации. Читать сообщения может только участник, иначе 403. Сообщение из сообщества, где вы не участник, — 404.
-
-- `text` — от 1 до 4000 символов, пробелы по краям обрезаются, пустое — 422.
-- `list` всегда отдаёт сообщения **по возрастанию `id`** (старые сверху, как в чате). `limit` — от 1 до 100, по умолчанию 50. `before_id` и `after_id` вместе — 400.
-- Новые сообщения сервер сам не присылает. Пока чат открыт, опрашивайте `after_id=<id последнего сообщения>` раз в 3–5 секунд. Если пришло ровно `limit` сообщений, запросите ещё раз с новым `after_id`.
-- Историю подгружайте при прокрутке вверх с `before_id=<id самого старого показанного>`. Если пришло меньше `limit`, история кончилась.
-
-```js
-let messages = await api(`/message/list?community_id=${id}`, { token });
-// опрос новых
-const lastId = messages.at(-1)?.id ?? 0;
-messages.push(...await api(`/message/list?community_id=${id}&after_id=${lastId}`, { token }));
-// история при прокрутке вверх
-const older = await api(`/message/list?community_id=${id}&before_id=${messages[0].id}`, { token });
-messages = [...older, ...messages];
-```
-
-### Recommendation
-
-Подбор для питомца по виду, возрасту, породе, рекомендациям врача (последний визит `vet_visit` с `diet_tags`/`diet_exclude`) и истории кормов. Вид берётся из `pet.type` (`кошка`, `кот`, `котёнок`, `собака`, `щенок` …), порода — из `pet.breed`, возраст — из `pet.birth_date`.
-
-| Метод | Путь | Ответ |
-|---|---|---|
-| GET | `/recommendation/food?pet_id=1` | 200 `Recommendation[]` — корма |
-| GET | `/recommendation/goods?pet_id=1` | 200 `Recommendation[]` — игрушки, аксессуары и уход |
-| GET | `/recommendation/goods?pet_id=1&kind=toy` | только игрушки; `kind`: `toy`, `accessory`, `care` |
-
-Параметр `limit` — сколько вернуть, 1–50, по умолчанию 10. Ошибки: 404 — питомец чужой или не найден; 400 `Pet type must be cat or dog for recommendations` — не указан или не распознан вид питомца (попросите указать «кошка» или «собака»).
-
-```json
-[
-  {
-    "id": 4,
-    "kind": "food",
-    "name": "Гипоаллергенный корм с ягнёнком для кошек",
-    "description": "Один источник белка, без злаков",
-    "tags": ["hypoallergenic", "skin_coat"],
-    "ingredients": ["lamb"],
-    "score": 3,
-    "reasons": ["рекомендовано ветеринаром: гипоаллергенный", "без исключённого врачом: курица"]
-  }
-]
-```
-
-Отсортировано по `score`. `reasons` — готовые подписи для интерфейса: почему товар предложен. Корма, которые не подошли или вызвали аллергию, и корма с аллергенами из них в выдачу не попадают. Рядом с рекомендациями стоит показать «Не заменяет консультацию ветеринара».
 
 ## Пример
 
