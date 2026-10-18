@@ -1,7 +1,7 @@
 from datetime import date, datetime
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, StringConstraints, field_validator, model_validator
 
 
 class UserIn(BaseModel):
@@ -125,6 +125,43 @@ class Notification(Prop):
 
 class NotificationCount(BaseModel):
     count: int
+
+
+# Пробелы по краям обрезаются; пустая строка — 422
+Name = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
+MessageText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4000)]
+
+
+class CommunityIn(BaseModel):
+    name: Name
+    description: str | None = None
+
+
+class Community(CommunityIn):
+    id: int
+    owner_id: int | None
+    member_ids: list[int]
+    created_at: datetime
+
+
+class Member(BaseModel):
+    # Публичная часть пользователя: почту и телефон другим участникам не показываем
+    id: int
+    name: str
+
+
+class MessageIn(BaseModel):
+    text: MessageText
+
+
+class Message(MessageIn):
+    id: int
+    community_id: int
+    # null — автор удалил аккаунт
+    from_id: int | None
+    from_name: str | None
+    created_at: datetime
+    edited_at: datetime | None
 
 
 class Recommendation(BaseModel):

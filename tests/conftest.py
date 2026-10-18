@@ -17,7 +17,7 @@ from db.migrate import migrate
 from src import handlers_user
 from src.main import app
 
-TABLES = "birthday_reads, notification_reads, email_codes, props, pets, users"
+TABLES = "messages, communities, birthday_reads, notification_reads, email_codes, props, pets, users"
 
 
 def _sql(query: str) -> None:

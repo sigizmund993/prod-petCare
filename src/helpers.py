@@ -16,6 +16,10 @@ def bad_request(detail: str):
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
 
 
+def forbidden(detail: str):
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
+
+
 def hash_password(password: str) -> str:
     salt = os.urandom(16)
     digest = hashlib.scrypt(password.encode(), salt=salt, n=2**14, r=8, p=1)
