@@ -20,18 +20,21 @@ def _url(method: str) -> str:
     return f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}/{method}"
 
 
-def send_message(chat_id: int, text: str) -> None:
+def send_message(chat_id: int, text: str) -> bool:
+    # True — доставлено или повторять бессмысленно; False — временный сбой (сеть, 429, 5xx), стоит повторить.
     # В логи пишем только тип ошибки: в тексте исключений httpx есть URL с токеном бота
     try:
         r = httpx.post(_url("sendMessage"), json={"chat_id": chat_id, "text": text}, timeout=10)
     except httpx.HTTPError as e:
         log.warning("Telegram sendMessage в %s: %s", chat_id, type(e).__name__)
-        return
+        return False
     if r.status_code == 403:
         # Пользователь заблокировал бота: отвязываем, чтобы не слать впустую
         queries.unlink_telegram_chat(chat_id)
     elif not r.is_success:
         log.warning("Telegram sendMessage в %s: %s %s", chat_id, r.status_code, r.text)
+        return not (r.status_code == 429 or r.status_code >= 500)
+    return True
 
 
 def _prop_text(prop: dict) -> str:
@@ -47,17 +50,17 @@ def _birthday_text(pet: dict) -> str:
 
 
 def send_due() -> None:
-    # Дублирует в Telegram уведомления, наступившие на сайте. Отметку ставим после отправки:
-    # если процесс упадёт посередине, сообщение придёт ещё раз, но не потеряется
+    # Дублирует в Telegram уведомления, наступившие на сайте. Отметку ставим только после успешной отправки:
+    # при сбое Telegram или падении процесса сообщение уйдёт на следующем круге, но не потеряется
     for prop in queries.list_telegram_due_props():
-        send_message(prop["telegram_chat_id"], _prop_text(prop))
-        queries.mark_telegram_sent(prop["user_id"], prop["id"], prop["date"])
+        if send_message(prop["telegram_chat_id"], _prop_text(prop)):
+            queries.mark_telegram_sent(prop["user_id"], prop["id"], prop["date"])
 
     # Дни рождения шлём не в полночь, а с BIRTHDAY_HOUR по местному времени
     if datetime.now(ZoneInfo(config.TIMEZONE)).hour >= BIRTHDAY_HOUR:
         for pet in queries.list_telegram_birthdays(config.TIMEZONE):
-            send_message(pet["telegram_chat_id"], _birthday_text(pet))
-            queries.mark_telegram_birthday_sent(pet["user_id"], pet["id"], pet["day"])
+            if send_message(pet["telegram_chat_id"], _birthday_text(pet)):
+                queries.mark_telegram_birthday_sent(pet["user_id"], pet["id"], pet["day"])
 
 
 async def notify_loop() -> None:

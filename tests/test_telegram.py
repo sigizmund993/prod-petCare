@@ -17,7 +17,7 @@ def bot(monkeypatch):
     monkeypatch.setattr(config, "TELEGRAM_BOT_TOKEN", "test-token")
     monkeypatch.setattr(config, "TELEGRAM_BOT_USERNAME", "petcare_test_bot")
     sent = []
-    monkeypatch.setattr(telegram, "send_message", lambda chat_id, text: sent.append((chat_id, text)))
+    monkeypatch.setattr(telegram, "send_message", lambda chat_id, text: sent.append((chat_id, text)) or True)
     return sent
 
 
@@ -172,3 +172,31 @@ def test_blocked_bot_unlinks(client, linked, monkeypatch):
 
     telegram.send_message(99, "привет")
     assert client.get("/user/me", headers=headers).json()["telegram_linked"] is False
+
+
+def test_failed_send_retried_next_round(client, linked, monkeypatch):
+    _, headers = linked()
+    client.post("/prop/add", json={"name": "Прививка", "date": at(-timedelta(hours=1))}, headers=headers)
+    attempts = []
+    monkeypatch.setattr(telegram, "send_message", lambda chat_id, text: attempts.append(text) or len(attempts) > 1)
+
+    telegram.send_due()  # Telegram недоступен — отметки нет
+    telegram.send_due()  # повтор успешен
+    telegram.send_due()  # больше не шлём
+    assert len(attempts) == 2
+
+
+@pytest.mark.parametrize(("status", "delivered"), [(200, True), (400, True), (429, False), (502, False)])
+def test_send_message_reports_temporary_failures(monkeypatch, status, delivered):
+    monkeypatch.setattr(config, "TELEGRAM_BOT_TOKEN", "test-token")
+    monkeypatch.setattr(httpx, "post", lambda *a, **kw: httpx.Response(status))
+    assert telegram.send_message(99, "привет") is delivered
+
+
+def test_send_message_network_error_is_temporary(monkeypatch):
+    def fail(*a, **kw):
+        raise httpx.ConnectError("нет сети")
+
+    monkeypatch.setattr(config, "TELEGRAM_BOT_TOKEN", "test-token")
+    monkeypatch.setattr(httpx, "post", fail)
+    assert telegram.send_message(99, "привет") is False
