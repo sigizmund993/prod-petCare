@@ -43,6 +43,14 @@ def with_owner(own_ids: list[int], user_id: int) -> list[int]:
     return ids if user_id in ids else [user_id, *ids]
 
 
+def years_word(n: int) -> str:
+    if n % 10 == 1 and n % 100 != 11:
+        return "год"
+    if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
+        return "года"
+    return "лет"
+
+
 def new_telegram_code() -> str:
     # Параметр start в ссылке t.me допускает только A-Z a-z 0-9 _ - и до 64 символов
     return secrets.token_urlsafe(24)

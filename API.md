@@ -40,7 +40,7 @@ POST /user/add  ──►  на почту приходит 6-значный к�
 | 400 | неверные ссылки (`Unknown user in own_ids`, `Unknown prop in prop_ids`), неверный или просроченный код |
 | 401 | нет токена, токен неверный или просрочен (без заголовка `Authorization` может прийти 403 `Not authenticated`) |
 | 403 | `Email not verified` при логине |
-| 404 | объект не найден **или чужой** (`User not found`, `Pet not found`, `Prop not found`) |
+| 404 | объект не найден **или чужой** (`User not found`, `Pet not found`, `Prop not found`, `Notification not found`) |
 | 409 | `Email already registered` или `Phone number already registered` |
 | 422 | тело или параметры не прошли валидацию; `detail` в этом случае — массив с описанием полей |
 
@@ -66,11 +66,15 @@ POST /user/add  ──►  на почту приходит 6-значный к�
   "name": "Барсик",
   "type": "кошка",
   "breed": "британская",
+  "birth_date": "2020-05-17",
   "own_ids": [1, 2],
-  "prop_ids": [5, 7]
+  "prop_ids": [5, 7],
+  "has_picture": true
 }
 ```
 - `type` — вид животного, `breed` — порода; обе строки необязательны (`null`).
+- `birth_date` — дата рождения в формате `YYYY-MM-DD`, необязательна (`null`). Дата из будущего — 422 с `loc: ["body", "birth_date"]`.
+- `has_picture` — загружена ли картинка. Саму картинку отдаёт `GET /pets/{pet_id}/photo`, в `Pet` её нет. Только для чтения: в `PetIn` не передаётся.
 - `own_ids` — id пользователей-владельцев.
 - `prop_ids` — id записей (Prop), привязанных к питомцу.
 
@@ -83,13 +87,36 @@ POST /user/add  ──►  на почту приходит 6-значный к�
   "text": null,
   "rep": false,
   "date": "2026-10-20T12:00:00Z",
-  "own_ids": [1]
+  "own_ids": [1],
+  "category": "vaccination",
+  "liked": null,
+  "suitable": null,
+  "reactions": []
 }
 ```
 - `msg`, `text` — необязательные строки (`null`).
 - `rep` — булево, по умолчанию `false`.
 - `date` — дата и время в ISO 8601, лучше передавать с часовым поясом (`Z` или `+03:00`).
 - `own_ids` — пользователи, которые видят запись.
+- `category` — тип записи, по умолчанию `reminder`:
+
+  | Значение | Что это |
+  |---|---|
+  | `reminder` | обычное напоминание |
+  | `food` | запись о корме (журнал питания) |
+  | `vaccination` | вакцинация |
+  | `parasites` | обработка от паразитов |
+  | `vet_visit` | посещение ветеринара, заключение — в `text` |
+  | `medication` | приём препарата |
+
+- Только для `category: "food"` (для других типов — 422):
+  - `liked` — понравилось (`true`) / не понравилось (`false`) / не оценено (`null`);
+  - `suitable` — подошло (`true`) / не подошло (`false`) / не оценено (`null`);
+  - `reactions` — нежелательные реакции: `gi` (ЖКТ), `allergy` (аллергия), `other`. Повторы убираются.
+- Записи `food` никогда не становятся уведомлениями — это история питания, а не напоминания.
+- Только для `category: "vet_visit"` (для других типов — 422) — рекомендации врача, по ним работают [рекомендации](#recommendation):
+  - `diet_tags` — что рекомендовано: `hypoallergenic`, `sensitive_digestion`, `weight_control`, `sterilised`, `urinary`, `renal`, `dental`, `joint`, `hairball`, `skin_coat`, `long_coat`, `brachycephalic`, `active`, `intellectual`, `chewer`;
+  - `diet_exclude` — каких ингредиентов избегать: `chicken`, `turkey`, `beef`, `lamb`, `fish`, `grain`, `rice`, `dairy`.
 
 ### Доступ и владельцы
 - Пользователь видит только тех питомцев и те записи, где его `id` есть в `own_ids`. На чужие объекты API отвечает 404.
@@ -148,7 +175,7 @@ POST /user/add  ──►  на почту приходит 6-значный к�
 
 Если бот на сервере не настроен, `POST /user/telegram/link` отвечает 503 `Telegram is not configured`.
 
-После `POST /prop/add` всем владельцам записи с подключённым Telegram приходит сообщение с названием, датой, `msg` и `text`.
+В Telegram приходят те же уведомления, что в `/notification/list`: запись с наступившей `date` (повторяющиеся — каждый день) и день рождения питомца (в 9:00 по Москве). Уже прочитанные на сайте и наступившие до подключения Telegram не приходят. Прочтение в Telegram на сайт не влияет: уведомление остаётся непрочитанным, пока его не прочитают на сайте.
 
 ### Pet
 
@@ -159,14 +186,44 @@ POST /user/add  ──►  на почту приходит 6-значный к�
 | GET | `/pet/get?pet_id=1` | — | 200 `Pet` |
 | PUT | `/pet/edit?pet_id=1` | `PetIn` | 200 `Pet` |
 | DELETE | `/pet/del?pet_id=1` | — | 204 |
+| POST | `/pets/1/photo` | `multipart/form-data`, поле `file` | 200 `{"pet_id": 1, "photo_url": "/pets/1/photo"}` |
+| GET | `/pets/1/photo` | — | 200, байты картинки (404, если её нет) |
+| DELETE | `/pets/1/photo` | — | 204 |
 
 Все ручки требуют авторизации.
 
 `PetIn`:
 ```json
-{ "name": "Барсик", "type": "кошка", "breed": "британская", "own_ids": [2], "prop_ids": [5] }
+{ "name": "Барсик", "type": "кошка", "breed": "британская", "birth_date": "2020-05-17", "own_ids": [2], "prop_ids": [5] }
 ```
-Обязательно только `name`. `type` и `breed` по умолчанию `null`, `own_ids` и `prop_ids` — `[]`.
+Обязательно только `name`. `type`, `breed` и `birth_date` по умолчанию `null`, `own_ids` и `prop_ids` — `[]`.
+
+#### Фото питомца
+
+Обратите внимание: у ручек фото **другая схема URL**, чем у остальных: `/pets/{pet_id}/photo` (id в пути, `pets` во множественном числе).
+
+- У питомца одно фото. Новая загрузка заменяет старое, `PUT /pet/edit` фото не трогает.
+- Форматы: **JPEG, PNG, WebP**, до **5 МБ**. Проверяется и `Content-Type` файла, и его содержимое. Иначе будет 400, слишком большой файл — 413.
+- `GET /pets/{pet_id}/photo` требует токен, поэтому `<img src="/pets/1/photo">` напрямую **не сработает**: браузер не отправит заголовок `Authorization`. Загрузите картинку через `fetch` и покажите её через blob URL:
+
+```js
+// загрузка
+const form = new FormData();
+form.append("file", fileInput.files[0]);
+await fetch(`${API}/pets/${petId}/photo`, {
+  method: "POST",
+  headers: { Authorization: `Bearer ${token}` }, // Content-Type не ставить: браузер сам добавит boundary
+  body: form,
+});
+
+// показ
+if (pet.has_picture) {
+  const res = await fetch(`${API}/pets/${pet.id}/photo`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  img.src = URL.createObjectURL(await res.blob());
+}
+```
 
 ### Prop
 
@@ -175,6 +232,7 @@ POST /user/add  ──►  на почту приходит 6-значный к�
 | POST | `/prop/add` | `PropIn` | 201 `Prop` |
 | GET | `/prop/list` | — | 200 `Prop[]` — все записи пользователя, по `date` |
 | GET | `/prop/list?pet_id=1` | — | 200 `Prop[]` — записи питомца, по `date` (404, если питомец чужой) |
+| GET | `/prop/list?pet_id=1&category=food&suitable=true` | — | 200 `Prop[]` — с фильтрами, см. ниже |
 | GET | `/prop/get?prop_id=5` | — | 200 `Prop` |
 | PUT | `/prop/edit?prop_id=5` | `PropIn` | 200 `Prop` |
 | DELETE | `/prop/del?prop_id=5` | — | 204 |
@@ -189,12 +247,95 @@ POST /user/add  ──►  на почту приходит 6-значный к�
   "msg": "Не забыть паспорт",
   "text": null,
   "rep": false,
-  "own_ids": []
+  "own_ids": [],
+  "category": "reminder"
 }
 ```
 Обязательны `name` и `date`.
 
+Запись о корме:
+```json
+{
+  "name": "Royal Canin Sterilised",
+  "date": "2026-10-16T09:00:00Z",
+  "category": "food",
+  "liked": true,
+  "suitable": false,
+  "reactions": ["gi"],
+  "text": "Мягкий стул на второй день"
+}
+```
+
+Фильтры `GET /prop/list` (все необязательные, комбинируются с `pet_id` и между собой):
+- `category` — тип записи: `?category=vaccination` — история вакцинаций;
+- `liked`, `suitable` — `true`/`false`: `?pet_id=1&category=food&suitable=true` — корма, которые подошли питомцу.
+
 `DELETE /prop/del` сам убирает запись из `prop_ids` всех питомцев.
+
+### Notification
+
+Уведомления бывают двух видов (поле `kind`):
+
+- `prop` — запись (Prop), у которой наступила `date`. Повторяющиеся записи (`rep: true`) срабатывают каждый день начиная с `date`, после прочтения уведомление снова появится на следующий день. `id` — id записи.
+- `birthday` — у питомца сегодня день рождения (по московскому времени, начиная с первой годовщины; родившиеся 29 февраля в невисокосный год — 28-го). Висит весь день, пока не прочитано, и вернётся через год. `id` и `pet_id` — id питомца.
+
+«Прочитано» у каждого владельца своё.
+
+```json
+[
+  {
+    "kind": "birthday", "id": 1, "pet_id": 1,
+    "name": "День рождения: Барсик", "msg": "Исполняется 3 года", "text": null,
+    "rep": true, "date": "2026-10-16T21:00:00Z", "own_ids": [1]
+  },
+  {
+    "kind": "prop", "id": 5, "pet_id": null,
+    "name": "Прививка", "msg": "Не забыть паспорт", "text": null,
+    "rep": false, "date": "2026-10-15T12:00:00Z", "own_ids": [1]
+  }
+]
+```
+
+| Метод | Путь | Тело | Ответ |
+|---|---|---|---|
+| GET | `/notification/list` | — | 200 `Notification[]` — непрочитанные, новые сверху; `date` — время срабатывания |
+| GET | `/notification/count` | — | 200 `{"count": 3}` |
+| POST | `/notification/read?prop_id=5` | — | 204 — прочитать уведомление о записи |
+| POST | `/notification/read?pet_id=1` | — | 204 — прочитать уведомление о дне рождения |
+| POST | `/notification/read_all` | — | 204 |
+
+`read` принимает ровно один из `prop_id`/`pet_id` (иначе 400) и отвечает 404, если такого непрочитанного уведомления нет. Удобно брать параметр по `kind`: `kind === "birthday" ? {pet_id: n.id} : {prop_id: n.id}`.
+
+Все ручки требуют авторизации. Новые уведомления сервер не присылает сам: опрашивайте `/notification/count` раз в 30–60 секунд и при открытии приложения.
+
+### Recommendation
+
+Подбор для питомца по виду, возрасту, породе, рекомендациям врача (последний визит `vet_visit` с `diet_tags`/`diet_exclude`) и истории кормов. Вид берётся из `pet.type` (`кошка`, `кот`, `котёнок`, `собака`, `щенок` …), порода — из `pet.breed`, возраст — из `pet.birth_date`.
+
+| Метод | Путь | Ответ |
+|---|---|---|
+| GET | `/recommendation/food?pet_id=1` | 200 `Recommendation[]` — корма |
+| GET | `/recommendation/goods?pet_id=1` | 200 `Recommendation[]` — игрушки, аксессуары и уход |
+| GET | `/recommendation/goods?pet_id=1&kind=toy` | только игрушки; `kind`: `toy`, `accessory`, `care` |
+
+Параметр `limit` — сколько вернуть, 1–50, по умолчанию 10. Ошибки: 404 — питомец чужой или не найден; 400 `Pet type must be cat or dog for recommendations` — не указан или не распознан вид питомца (попросите указать «кошка» или «собака»).
+
+```json
+[
+  {
+    "id": 4,
+    "kind": "food",
+    "name": "Гипоаллергенный корм с ягнёнком для кошек",
+    "description": "Один источник белка, без злаков",
+    "tags": ["hypoallergenic", "skin_coat"],
+    "ingredients": ["lamb"],
+    "score": 3,
+    "reasons": ["рекомендовано ветеринаром: гипоаллергенный", "без исключённого врачом: курица"]
+  }
+]
+```
+
+Отсортировано по `score`. `reasons` — готовые подписи для интерфейса: почему товар предложен. Корма, которые не подошли или вызвали аллергию, и корма с аллергенами из них в выдачу не попадают. Рядом с рекомендациями стоит показать «Не заменяет консультацию ветеринара».
 
 ## Пример
 
@@ -223,4 +364,5 @@ const pets = await api("/pet/list", { token: access_token });
 
 ## CORS
 
-Бэкенд принимает запросы только с одного origin — того, что задан в `CORS_ORIGIN` на сервере. Сообщите бэкендерам адрес, с которого открывается фронт (например, `http://localhost:5173` для разработки), иначе браузер заблокирует запросы.
+- Фронт, запущенный на **`localhost` или `127.0.0.1` на любом порту** (`http://localhost:5173`, `http://localhost:3000` и т.д.), может ходить и в локальный бэкенд, и в прод `http://139.100.200.207:8080`, ничего настраивать не нужно.
+- Для любого другого адреса фронта (домен, IP в локальной сети) сообщите его бэкендерам: его добавят в `CORS_ORIGIN`, иначе браузер заблокирует запросы.

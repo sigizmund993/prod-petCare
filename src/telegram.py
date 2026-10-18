@@ -1,16 +1,19 @@
 import asyncio
 import logging
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import httpx
 
 from db import queries
 from src import config
-from src.helpers import hash_telegram_code
+from src.helpers import hash_telegram_code, years_word
 
 log = logging.getLogger("uvicorn.error")
 
 POLL_TIMEOUT = 30  # секунд, long polling
+NOTIFY_INTERVAL = 60  # секунд между проверками наступивших уведомлений
+BIRTHDAY_HOUR = 9
 
 
 def _url(method: str) -> str:
@@ -31,18 +34,39 @@ def send_message(chat_id: int, text: str) -> None:
         log.warning("Telegram sendMessage в %s: %s %s", chat_id, r.status_code, r.text)
 
 
-def notify_new_prop(prop: dict) -> None:
-    if not config.TELEGRAM_BOT_TOKEN:
-        return
+def _prop_text(prop: dict) -> str:
     date = prop["date"].astimezone(ZoneInfo(config.TIMEZONE)).strftime("%d.%m.%Y %H:%M")
-    lines = [f"🐾 Новая запись: {prop['name']}", f"📅 {date}"]
-    if prop["msg"]:
-        lines.append(prop["msg"])
-    if prop["text"]:
-        lines.append(prop["text"])
-    text = "\n".join(lines)
-    for chat_id in queries.get_telegram_chats(prop["own_ids"]):
-        send_message(chat_id, text)
+    lines = [f"🔔 {prop['name']}", f"📅 {date}"]
+    lines += [line for line in (prop["msg"], prop["text"]) if line]
+    return "\n".join(lines)
+
+
+def _birthday_text(pet: dict) -> str:
+    # Тот же текст, что в уведомлении на сайте (handlers_notification.birthday_notification)
+    return f"🎂 День рождения: {pet['name']}\nИсполняется {pet['years']} {years_word(pet['years'])}"
+
+
+def send_due() -> None:
+    # Дублирует в Telegram уведомления, наступившие на сайте. Отметку ставим после отправки:
+    # если процесс упадёт посередине, сообщение придёт ещё раз, но не потеряется
+    for prop in queries.list_telegram_due_props():
+        send_message(prop["telegram_chat_id"], _prop_text(prop))
+        queries.mark_telegram_sent(prop["user_id"], prop["id"], prop["date"])
+
+    # Дни рождения шлём не в полночь, а с BIRTHDAY_HOUR по местному времени
+    if datetime.now(ZoneInfo(config.TIMEZONE)).hour >= BIRTHDAY_HOUR:
+        for pet in queries.list_telegram_birthdays(config.TIMEZONE):
+            send_message(pet["telegram_chat_id"], _birthday_text(pet))
+            queries.mark_telegram_birthday_sent(pet["user_id"], pet["id"], pet["day"])
+
+
+async def notify_loop() -> None:
+    while True:
+        try:
+            await asyncio.to_thread(send_due)
+        except Exception:
+            log.exception("Не удалось разослать уведомления в Telegram")
+        await asyncio.sleep(NOTIFY_INTERVAL)
 
 
 def handle_update(update: dict) -> None:
@@ -63,6 +87,10 @@ def handle_update(update: dict) -> None:
     elif text == "/stop":
         queries.unlink_telegram_chat(chat_id)
         send_message(chat_id, "Уведомления отключены. Подключить снова можно в профиле на сайте.")
+
+
+async def run() -> None:
+    await asyncio.gather(poll_updates(), notify_loop())
 
 
 async def poll_updates() -> None:

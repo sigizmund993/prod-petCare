@@ -9,7 +9,6 @@ services:
       - "5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./sql:/docker-entrypoint-initdb.d:ro
     networks:
       - app_network
     healthcheck:
@@ -26,7 +25,8 @@ services:
       - "8080:8080"
     environment:
       - DATABASE_URL=postgresql://user:password@db:5432/petcare
-      - CORS_ORIGIN=${CORS_ORIGIN:-http://localhost}
+      - CORS_ORIGIN=${CORS_ORIGIN:-}
+      - CORS_ALLOW_LOCALHOST=${CORS_ALLOW_LOCALHOST:-1}
       - JWT_SECRET=${JWT_SECRET:-dev-secret}
       # Для разработки заведите отдельного бота: опрашивать один бот может только один процесс
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}

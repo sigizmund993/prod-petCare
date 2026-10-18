@@ -1,0 +1,10 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.coverage.run]
+source = ["src", "db"]
+
+[tool.ruff]
+line-length = 140
+extend-exclude = [".venv", "venv"]

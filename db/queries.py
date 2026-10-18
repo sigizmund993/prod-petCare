@@ -1,12 +1,12 @@
-from datetime import datetime
+from datetime import date, datetime
 
 from psycopg import Connection
 
 from db import db
 
 USER_COLUMNS = "id, email, phone_number, name, email_verified, telegram_chat_id IS NOT NULL AS telegram_linked"
-PET_COLUMNS = "id, name, type, breed, own_ids, prop_ids"
-PROP_COLUMNS = "id, name, msg, text, rep, date, own_ids"
+PET_COLUMNS = "id, name, type, breed, birth_date, own_ids, prop_ids, picture IS NOT NULL AS has_picture"
+PROP_COLUMNS = "id, name, msg, text, rep, date, own_ids, category, liked, suitable, reactions, diet_tags, diet_exclude"
 
 
 # ---------- проверки ----------
@@ -129,7 +129,9 @@ def link_telegram(code_hash: str, chat_id: int) -> bool:
         if row is None:
             return False
         conn.execute("UPDATE users SET telegram_chat_id = NULL WHERE telegram_chat_id = %s", (chat_id,))
-        conn.execute("UPDATE users SET telegram_chat_id = %s WHERE id = %s", (chat_id, row["user_id"]))
+        conn.execute(
+            "UPDATE users SET telegram_chat_id = %s, telegram_linked_at = now() WHERE id = %s", (chat_id, row["user_id"])
+        )
         return True
 
 
@@ -141,14 +143,6 @@ def unlink_telegram(user_id: int) -> None:
 def unlink_telegram_chat(chat_id: int) -> None:
     with db.pool.connection() as conn:
         conn.execute("UPDATE users SET telegram_chat_id = NULL WHERE telegram_chat_id = %s", (chat_id,))
-
-
-def get_telegram_chats(user_ids: list[int]) -> list[int]:
-    with db.pool.connection() as conn:
-        rows = conn.execute(
-            "SELECT telegram_chat_id FROM users WHERE id = ANY(%s) AND telegram_chat_id IS NOT NULL", (user_ids,)
-        ).fetchall()
-        return [r["telegram_chat_id"] for r in rows]
 
 
 def delete_user(user_id: int) -> bool:
@@ -169,12 +163,12 @@ def delete_user(user_id: int) -> bool:
 
 # ---------- pets ----------
 
-def create_pet(user_id: int, name: str, type: str | None, breed: str | None, own_ids: list[int], prop_ids: list[int]) -> dict:
+def create_pet(user_id: int, name: str, type: str | None, breed: str | None, birth_date: date | None, own_ids: list[int], prop_ids: list[int]) -> dict:
     with db.pool.connection() as conn:
         _check_refs(conn, user_id, own_ids, prop_ids)
         return conn.execute(
-            f"INSERT INTO pets (name, type, breed, own_ids, prop_ids) VALUES (%s, %s, %s, %s, %s) RETURNING {PET_COLUMNS}",
-            (name, type, breed, own_ids, prop_ids),
+            f"INSERT INTO pets (name, type, breed, birth_date, own_ids, prop_ids) VALUES (%s, %s, %s, %s, %s, %s) RETURNING {PET_COLUMNS}",
+            (name, type, breed, birth_date, own_ids, prop_ids),
         ).fetchone()
 
 
@@ -192,12 +186,29 @@ def list_pets(user_id: int) -> list[dict]:
         ).fetchall()
 
 
-def update_pet(pet_id: int, user_id: int, name: str, type: str | None, breed: str | None, own_ids: list[int], prop_ids: list[int]) -> dict | None:
+def update_pet(pet_id: int, user_id: int, name: str, type: str | None, breed: str | None, birth_date: date | None, own_ids: list[int], prop_ids: list[int]) -> dict | None:
     with db.pool.connection() as conn:
         _check_refs(conn, user_id, own_ids, prop_ids)
         return conn.execute(
-            f"UPDATE pets SET name = %s, type = %s, breed = %s, own_ids = %s, prop_ids = %s WHERE id = %s AND %s = ANY(own_ids) RETURNING {PET_COLUMNS}",
-            (name, type, breed, own_ids, prop_ids, pet_id, user_id),
+            f"UPDATE pets SET name = %s, type = %s, breed = %s, birth_date = %s, own_ids = %s, prop_ids = %s WHERE id = %s AND %s = ANY(own_ids) RETURNING {PET_COLUMNS}",
+            (name, type, breed, birth_date, own_ids, prop_ids, pet_id, user_id),
+        ).fetchone()
+
+
+def set_pet_picture(pet_id: int, user_id: int, picture: bytes | None, picture_type: str | None) -> bool:
+    # picture=None удаляет картинку; False — питомца нет или он чужой
+    with db.pool.connection() as conn:
+        return conn.execute(
+            "UPDATE pets SET picture = %s, picture_type = %s WHERE id = %s AND %s = ANY(own_ids)",
+            (picture, picture_type, pet_id, user_id),
+        ).rowcount > 0
+
+
+def get_pet_picture(pet_id: int, user_id: int) -> dict | None:
+    with db.pool.connection() as conn:
+        return conn.execute(
+            "SELECT picture, picture_type FROM pets WHERE id = %s AND %s = ANY(own_ids) AND picture IS NOT NULL",
+            (pet_id, user_id),
         ).fetchone()
 
 
@@ -210,12 +221,15 @@ def delete_pet(pet_id: int, user_id: int) -> bool:
 
 # ---------- props ----------
 
-def create_prop(user_id: int, name: str, msg: str | None, text: str | None, rep: bool, date: datetime, own_ids: list[int]) -> dict:
+def create_prop(user_id: int, name: str, msg: str | None, text: str | None, rep: bool, date: datetime, own_ids: list[int],
+                category: str, liked: bool | None, suitable: bool | None, reactions: list[str],
+                diet_tags: list[str], diet_exclude: list[str]) -> dict:
     with db.pool.connection() as conn:
         _check_refs(conn, user_id, own_ids)
         return conn.execute(
-            f"INSERT INTO props (name, msg, text, rep, date, own_ids) VALUES (%s, %s, %s, %s, %s, %s) RETURNING {PROP_COLUMNS}",
-            (name, msg, text, rep, date, own_ids),
+            "INSERT INTO props (name, msg, text, rep, date, own_ids, category, liked, suitable, reactions, diet_tags, diet_exclude) "
+            f"VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING {PROP_COLUMNS}",
+            (name, msg, text, rep, date, own_ids, category, liked, suitable, reactions, diet_tags, diet_exclude),
         ).fetchone()
 
 
@@ -226,14 +240,24 @@ def get_prop(prop_id: int, user_id: int) -> dict | None:
         ).fetchone()
 
 
-def list_props(user_id: int) -> list[dict]:
+# Необязательные фильтры списка записей: None — не фильтровать
+_PROP_FILTERS = (
+    "(%(category)s::text IS NULL OR category = %(category)s) "
+    "AND (%(liked)s::boolean IS NULL OR liked = %(liked)s) "
+    "AND (%(suitable)s::boolean IS NULL OR suitable = %(suitable)s)"
+)
+
+
+def list_props(user_id: int, category: str | None = None, liked: bool | None = None, suitable: bool | None = None) -> list[dict]:
     with db.pool.connection() as conn:
         return conn.execute(
-            f"SELECT {PROP_COLUMNS} FROM props WHERE %s = ANY(own_ids) ORDER BY date", (user_id,)
+            f"SELECT {PROP_COLUMNS} FROM props WHERE %(user_id)s = ANY(own_ids) AND {_PROP_FILTERS} ORDER BY date",
+            {"user_id": user_id, "category": category, "liked": liked, "suitable": suitable},
         ).fetchall()
 
 
-def list_props_by_pet(pet_id: int, user_id: int) -> list[dict] | None:
+def list_props_by_pet(pet_id: int, user_id: int, category: str | None = None, liked: bool | None = None,
+                      suitable: bool | None = None) -> list[dict] | None:
     # Владелец питомца видит все его записи; None — питомца нет или он чужой
     with db.pool.connection() as conn:
         pet = conn.execute(
@@ -242,16 +266,21 @@ def list_props_by_pet(pet_id: int, user_id: int) -> list[dict] | None:
         if pet is None:
             return None
         return conn.execute(
-            f"SELECT {PROP_COLUMNS} FROM props WHERE id = ANY(%s) ORDER BY date", (pet["prop_ids"],)
+            f"SELECT {PROP_COLUMNS} FROM props WHERE id = ANY(%(ids)s) AND {_PROP_FILTERS} ORDER BY date",
+            {"ids": pet["prop_ids"], "category": category, "liked": liked, "suitable": suitable},
         ).fetchall()
 
 
-def update_prop(prop_id: int, user_id: int, name: str, msg: str | None, text: str | None, rep: bool, date: datetime, own_ids: list[int]) -> dict | None:
+def update_prop(prop_id: int, user_id: int, name: str, msg: str | None, text: str | None, rep: bool, date: datetime, own_ids: list[int],
+                category: str, liked: bool | None, suitable: bool | None, reactions: list[str],
+                diet_tags: list[str], diet_exclude: list[str]) -> dict | None:
     with db.pool.connection() as conn:
         _check_refs(conn, user_id, own_ids)
         return conn.execute(
-            f"UPDATE props SET name = %s, msg = %s, text = %s, rep = %s, date = %s, own_ids = %s WHERE id = %s AND %s = ANY(own_ids) RETURNING {PROP_COLUMNS}",
-            (name, msg, text, rep, date, own_ids, prop_id, user_id),
+            "UPDATE props SET name = %s, msg = %s, text = %s, rep = %s, date = %s, own_ids = %s, "
+            "category = %s, liked = %s, suitable = %s, reactions = %s, diet_tags = %s, diet_exclude = %s "
+            f"WHERE id = %s AND %s = ANY(own_ids) RETURNING {PROP_COLUMNS}",
+            (name, msg, text, rep, date, own_ids, category, liked, suitable, reactions, diet_tags, diet_exclude, prop_id, user_id),
         ).fetchone()
 
 
@@ -264,3 +293,159 @@ def delete_prop(prop_id: int, user_id: int) -> bool:
         if deleted:
             conn.execute("UPDATE pets SET prop_ids = array_remove(prop_ids, %s) WHERE %s = ANY(prop_ids)", (prop_id, prop_id))
         return deleted > 0
+
+
+# ---------- уведомления ----------
+
+# Последнее наступившее срабатывание записи: повторяющиеся срабатывают каждый день начиная с date
+_OCCURRENCE = (
+    "CASE WHEN p.rep AND p.date <= now() "
+    "THEN p.date + make_interval(days => floor(extract(epoch FROM now() - p.date) / 86400)::int) "
+    "ELSE p.date END"
+)
+
+_DUE_PROPS = f"""
+    SELECT p.id, p.name, p.msg, p.text, p.rep, {_OCCURRENCE} AS date, p.own_ids,
+           p.category, p.liked, p.suitable, p.reactions, p.diet_tags, p.diet_exclude
+    FROM props p
+    LEFT JOIN notification_reads r ON r.prop_id = p.id AND r.user_id = %(user_id)s
+    -- Записи о кормах — история питания, а не напоминания
+    WHERE %(user_id)s = ANY(p.own_ids) AND p.date <= now() AND p.category <> 'food'
+      AND (r.read_date IS NULL OR r.read_date < {_OCCURRENCE})
+"""
+
+
+# День рождения в этом году (29 февраля в невисокосный год становится 28-м); today — дата в часовом поясе %(tz)s
+_BIRTHDAYS = """
+    SELECT p.id, p.name, p.own_ids, y.years, b.day,
+           b.day::timestamp AT TIME ZONE %(tz)s AS date
+    FROM pets p
+    CROSS JOIN (SELECT (now() AT TIME ZONE %(tz)s)::date AS today) t
+    CROSS JOIN LATERAL (SELECT (extract(year FROM t.today) - extract(year FROM p.birth_date))::int AS years) y
+    CROSS JOIN LATERAL (SELECT (p.birth_date + make_interval(years => y.years))::date AS day) b
+    LEFT JOIN birthday_reads r ON r.pet_id = p.id AND r.user_id = %(user_id)s
+    WHERE %(user_id)s = ANY(p.own_ids) AND y.years >= 1 AND b.day = t.today
+      AND (r.read_date IS NULL OR r.read_date < b.day)
+"""
+
+
+def list_notifications(user_id: int) -> list[dict]:
+    with db.pool.connection() as conn:
+        return conn.execute(f"{_DUE_PROPS} ORDER BY date DESC", {"user_id": user_id}).fetchall()
+
+
+def list_birthdays(user_id: int, tz: str) -> list[dict]:
+    with db.pool.connection() as conn:
+        return conn.execute(f"{_BIRTHDAYS} ORDER BY p.id", {"user_id": user_id, "tz": tz}).fetchall()
+
+
+def count_notifications(user_id: int, tz: str) -> int:
+    with db.pool.connection() as conn:
+        return conn.execute(
+            f"SELECT (SELECT count(*) FROM ({_DUE_PROPS}) d) + (SELECT count(*) FROM ({_BIRTHDAYS}) b) AS n",
+            {"user_id": user_id, "tz": tz},
+        ).fetchone()["n"]
+
+
+def read_notifications(user_id: int, prop_id: int | None = None) -> int:
+    # Отмечает прочитанными наступившие уведомления (одно или все); возвращает их количество
+    with db.pool.connection() as conn:
+        return conn.execute(
+            f"""
+            INSERT INTO notification_reads (user_id, prop_id, read_date)
+            SELECT %(user_id)s, id, date FROM ({_DUE_PROPS}) due
+            WHERE %(prop_id)s::bigint IS NULL OR id = %(prop_id)s
+            ON CONFLICT (user_id, prop_id) DO UPDATE SET read_date = EXCLUDED.read_date
+            """,
+            {"user_id": user_id, "prop_id": prop_id},
+        ).rowcount
+
+
+def read_birthdays(user_id: int, tz: str, pet_id: int | None = None) -> int:
+    with db.pool.connection() as conn:
+        return conn.execute(
+            f"""
+            INSERT INTO birthday_reads (user_id, pet_id, read_date)
+            SELECT %(user_id)s, id, day FROM ({_BIRTHDAYS}) due
+            WHERE %(pet_id)s::bigint IS NULL OR id = %(pet_id)s
+            ON CONFLICT (user_id, pet_id) DO UPDATE SET read_date = EXCLUDED.read_date
+            """,
+            {"user_id": user_id, "tz": tz, "pet_id": pet_id},
+        ).rowcount
+
+
+# ---------- уведомления в Telegram ----------
+
+# То же, что _DUE_PROPS и _BIRTHDAYS, но сразу по всем пользователям с Telegram. Не шлём то, что уже
+# отправлено или прочитано на сайте, и то, что наступило до привязки (иначе при подключении придёт вся история)
+_TELEGRAM_DUE_PROPS = f"""
+    SELECT u.id AS user_id, u.telegram_chat_id, p.id, p.name, p.msg, p.text, {_OCCURRENCE} AS date
+    FROM props p
+    JOIN users u ON u.id = ANY(p.own_ids) AND u.telegram_chat_id IS NOT NULL
+    LEFT JOIN notification_reads r ON r.prop_id = p.id AND r.user_id = u.id
+    LEFT JOIN telegram_sent s ON s.prop_id = p.id AND s.user_id = u.id
+    WHERE p.date <= now() AND p.category <> 'food' AND {_OCCURRENCE} > u.telegram_linked_at
+      AND (r.read_date IS NULL OR r.read_date < {_OCCURRENCE})
+      AND (s.sent_date IS NULL OR s.sent_date < {_OCCURRENCE})
+"""
+
+_TELEGRAM_BIRTHDAYS = """
+    SELECT u.id AS user_id, u.telegram_chat_id, p.id, p.name, y.years, b.day
+    FROM pets p
+    CROSS JOIN (SELECT (now() AT TIME ZONE %(tz)s)::date AS today) t
+    CROSS JOIN LATERAL (SELECT (extract(year FROM t.today) - extract(year FROM p.birth_date))::int AS years) y
+    CROSS JOIN LATERAL (SELECT (p.birth_date + make_interval(years => y.years))::date AS day) b
+    JOIN users u ON u.id = ANY(p.own_ids) AND u.telegram_chat_id IS NOT NULL
+    LEFT JOIN birthday_reads r ON r.pet_id = p.id AND r.user_id = u.id
+    LEFT JOIN telegram_birthday_sent s ON s.pet_id = p.id AND s.user_id = u.id
+    WHERE y.years >= 1 AND b.day = t.today
+      AND (r.read_date IS NULL OR r.read_date < b.day)
+      AND (s.sent_date IS NULL OR s.sent_date < b.day)
+"""
+
+
+def list_telegram_due_props() -> list[dict]:
+    with db.pool.connection() as conn:
+        return conn.execute(f"{_TELEGRAM_DUE_PROPS} ORDER BY date").fetchall()
+
+
+def list_telegram_birthdays(tz: str) -> list[dict]:
+    with db.pool.connection() as conn:
+        return conn.execute(f"{_TELEGRAM_BIRTHDAYS} ORDER BY p.id", {"tz": tz}).fetchall()
+
+
+def mark_telegram_sent(user_id: int, prop_id: int, sent_date: datetime) -> None:
+    with db.pool.connection() as conn:
+        conn.execute(
+            "INSERT INTO telegram_sent (user_id, prop_id, sent_date) VALUES (%s, %s, %s) "
+            "ON CONFLICT (user_id, prop_id) DO UPDATE SET sent_date = EXCLUDED.sent_date",
+            (user_id, prop_id, sent_date),
+        )
+
+
+def mark_telegram_birthday_sent(user_id: int, pet_id: int, sent_date: date) -> None:
+    with db.pool.connection() as conn:
+        conn.execute(
+            "INSERT INTO telegram_birthday_sent (user_id, pet_id, sent_date) VALUES (%s, %s, %s) "
+            "ON CONFLICT (user_id, pet_id) DO UPDATE SET sent_date = EXCLUDED.sent_date",
+            (user_id, pet_id, sent_date),
+        )
+
+
+# ---------- рекомендации ----------
+
+PRODUCT_COLUMNS = "id, kind, name, description, species, age_groups, sizes, tags, ingredients"
+
+
+def find_breed(species: str, breed: str | None) -> dict | None:
+    if not breed:
+        return None
+    with db.pool.connection() as conn:
+        return conn.execute(
+            "SELECT name, size, tags FROM breeds WHERE species = %s AND %s = ANY(names)", (species, breed.strip().lower())
+        ).fetchone()
+
+
+def list_products(kinds: list[str]) -> list[dict]:
+    with db.pool.connection() as conn:
+        return conn.execute(f"SELECT {PRODUCT_COLUMNS} FROM products WHERE kind = ANY(%s) ORDER BY id", (kinds,)).fetchall()

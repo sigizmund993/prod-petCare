@@ -2,11 +2,27 @@
 
 ```
 db/       подключение к БД и запросы
-sql/      миграции (монтируются в postgres как docker-entrypoint-initdb.d)
+sql/      миграции (применяются автоматически при старте приложения)
 src/      FastAPI приложение и хендлеры
 ```
 
 Запуск: `make run-dev` → http://localhost:8080/docs
+
+Архитектура и обоснование решений — [ARCHITECTURE.md](ARCHITECTURE.md), контракт API — [API.md](API.md).
+
+## Тесты
+
+Интеграционные тесты в `tests/` ходят в API через HTTP и работают с настоящим Postgres: регистрация и подтверждение почты, питомцы, записи, уведомления, права доступа. Юнит-тесты покрывают хэширование паролей, JWT и отправку почты.
+
+```
+pip install -r requirements.txt -r requirements-dev.txt
+make db-test                     # поднимает пустую БД для тестов в docker на порту 5434
+make test                        # pytest + отчёт покрытия в htmlcov/index.html
+```
+
+`TEST_DATABASE_URL` обязателен: схема этой БД пересоздаётся при каждом запуске, поэтому рабочую базу туда не указывайте.
+
+В CI джобы `lint` (ruff) и `test` запускаются в каждом merge request и в `master` до сборки образа. Если они падают, деплоя не будет. Список сценариев смотрите во вкладке **Tests** пайплайна, покрытие по строкам — в артефакте `htmlcov/` джобы `test`.
 
 ## Подтверждение почты
 
@@ -23,12 +39,12 @@ src/      FastAPI приложение и хендлеры
 
 1. `POST /user/telegram/link` → ссылка `https://t.me/<бот>?start=<код>` (живёт 15 минут).
 2. Пользователь жмёт Start — бот привязывает его `chat_id` к аккаунту. `/stop` в боте или `DELETE /user/telegram` отвязывают.
-3. При `POST /prop/add` всем владельцам записи с подключённым Telegram приходит сообщение.
+3. Раз в минуту бот дублирует в Telegram уведомления с сайта (`/notification/list`): наступившие записи и дни рождения питомцев (дни рождения — с 9:00 по `TIMEZONE`). Не приходит то, что уже прочитано на сайте, и то, что наступило до подключения Telegram.
 
 ## Деплой (Spirit GitLab)
 
-`push` в `master` → `build:image` (Kaniko, prod-стадия Dockerfile → Spirit Registry) → `setup:vm` (ставит `dp`) → `deploy:vm` (ssh + `docker compose` из `deploy/docker-compose.yml`).
-В merge request выполняется только `build:image`.
+`push` в `master` → `lint` и `test` → `build:image` (Kaniko, prod-стадия Dockerfile → Spirit Registry) → `setup:vm` (ставит `dp`) → `deploy:vm` (ssh + `docker compose` из `deploy/docker-compose.yml`).
+В merge request выполняются `lint`, `test` и `build:image`, без деплоя.
 
 CI-переменные (Spirit → Код → Репозитории → репозиторий → CI-переменные):
 
@@ -43,6 +59,14 @@ CI-переменные (Spirit → Код → Репозитории → реп
 | `SMTP_PASSWORD` | Переменная, защищённая | пароль SMTP (для Яндекса/Mail.ru — пароль приложения) |
 | `TELEGRAM_BOT_TOKEN` | Переменная, защищённая | токен бота от @BotFather. Без него Telegram-уведомления выключены |
 | `TELEGRAM_BOT_USERNAME` | Переменная | имя бота без `@`, например `petcare_bot` |
-| `DEPLOY_USER`, `APP_PORT`, `POSTGRES_USER`, `POSTGRES_DB`, `CORS_ORIGIN` | Переменная, необязательно | по умолчанию `root`, `8080`, `petcare`, `petcare`, `http://localhost` |
+| `DEPLOY_USER`, `APP_PORT`, `POSTGRES_USER`, `POSTGRES_DB` | Переменная, необязательно | по умолчанию `root`, `8080`, `petcare`, `petcare` |
+| `CORS_ORIGIN` | Переменная, необязательно | адреса фронта через запятую, по умолчанию пусто |
+| `CORS_ALLOW_LOCALHOST` | Переменная, необязательно | `1` (по умолчанию) — пускать фронт с `localhost`/`127.0.0.1` на любом порту; `0` — выключить |
 
-На ВМ всё лежит в `~/app` (`docker-compose.yml`, `sql/`, `.env`). Миграции из `sql/` применяются только при первом создании тома `pgdata`.
+На ВМ всё лежит в `~/app` (`docker-compose.yml`, `.env`).
+
+## Миграции
+
+Файлы `sql/NNN_*.sql` применяются автоматически при старте приложения, по порядку имён. Применённые записываются в таблицу `schema_migrations`, повторно не выполняются.
+Новая миграция — новый файл со следующим номером; уже применённые файлы не редактируйте (изменения в них не применятся).
+Если миграция упала, она откатывается целиком, а приложение не стартует — смотрите `docker compose logs app`.

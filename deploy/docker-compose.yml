@@ -8,7 +8,6 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./sql:/docker-entrypoint-initdb.d:ro
     networks:
       - app_network
     healthcheck:
@@ -24,7 +23,8 @@ services:
       - "${APP_PORT:-8080}:8080"
     environment:
       - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
-      - CORS_ORIGIN=${CORS_ORIGIN}
+      - CORS_ORIGIN=${CORS_ORIGIN:-}
+      - CORS_ALLOW_LOCALHOST=${CORS_ALLOW_LOCALHOST:-1}
       - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required}
       - SMTP_HOST=${SMTP_HOST:-}
       - SMTP_PORT=${SMTP_PORT:-587}
