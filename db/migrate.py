@@ -26,7 +26,7 @@ def migrate(dsn: str) -> None:
                     continue
                 log.info("Применяю миграцию %s", path.name)
                 with conn.transaction():
-                    conn.execute(path.read_text())
+                    conn.execute(path.read_text(encoding="utf-8"))
                     conn.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (path.name,))
         finally:
             conn.execute("SELECT pg_advisory_unlock(%s)", (LOCK_KEY,))

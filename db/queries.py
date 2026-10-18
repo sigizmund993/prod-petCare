@@ -6,7 +6,7 @@ from db import db
 
 USER_COLUMNS = "id, email, phone_number, name, email_verified"
 PET_COLUMNS = "id, name, type, breed, birth_date, own_ids, prop_ids, picture IS NOT NULL AS has_picture"
-PROP_COLUMNS = "id, name, msg, text, rep, date, own_ids, category, liked, suitable, reactions"
+PROP_COLUMNS = "id, name, msg, text, rep, date, own_ids, category, liked, suitable, reactions, diet_tags, diet_exclude"
 
 
 # ---------- проверки ----------
@@ -182,13 +182,14 @@ def delete_pet(pet_id: int, user_id: int) -> bool:
 # ---------- props ----------
 
 def create_prop(user_id: int, name: str, msg: str | None, text: str | None, rep: bool, date: datetime, own_ids: list[int],
-                category: str, liked: bool | None, suitable: bool | None, reactions: list[str]) -> dict:
+                category: str, liked: bool | None, suitable: bool | None, reactions: list[str],
+                diet_tags: list[str], diet_exclude: list[str]) -> dict:
     with db.pool.connection() as conn:
         _check_refs(conn, user_id, own_ids)
         return conn.execute(
-            "INSERT INTO props (name, msg, text, rep, date, own_ids, category, liked, suitable, reactions) "
-            f"VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING {PROP_COLUMNS}",
-            (name, msg, text, rep, date, own_ids, category, liked, suitable, reactions),
+            "INSERT INTO props (name, msg, text, rep, date, own_ids, category, liked, suitable, reactions, diet_tags, diet_exclude) "
+            f"VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING {PROP_COLUMNS}",
+            (name, msg, text, rep, date, own_ids, category, liked, suitable, reactions, diet_tags, diet_exclude),
         ).fetchone()
 
 
@@ -231,14 +232,15 @@ def list_props_by_pet(pet_id: int, user_id: int, category: str | None = None, li
 
 
 def update_prop(prop_id: int, user_id: int, name: str, msg: str | None, text: str | None, rep: bool, date: datetime, own_ids: list[int],
-                category: str, liked: bool | None, suitable: bool | None, reactions: list[str]) -> dict | None:
+                category: str, liked: bool | None, suitable: bool | None, reactions: list[str],
+                diet_tags: list[str], diet_exclude: list[str]) -> dict | None:
     with db.pool.connection() as conn:
         _check_refs(conn, user_id, own_ids)
         return conn.execute(
             "UPDATE props SET name = %s, msg = %s, text = %s, rep = %s, date = %s, own_ids = %s, "
-            "category = %s, liked = %s, suitable = %s, reactions = %s "
+            "category = %s, liked = %s, suitable = %s, reactions = %s, diet_tags = %s, diet_exclude = %s "
             f"WHERE id = %s AND %s = ANY(own_ids) RETURNING {PROP_COLUMNS}",
-            (name, msg, text, rep, date, own_ids, category, liked, suitable, reactions, prop_id, user_id),
+            (name, msg, text, rep, date, own_ids, category, liked, suitable, reactions, diet_tags, diet_exclude, prop_id, user_id),
         ).fetchone()
 
 
@@ -264,7 +266,7 @@ _OCCURRENCE = (
 
 _DUE_PROPS = f"""
     SELECT p.id, p.name, p.msg, p.text, p.rep, {_OCCURRENCE} AS date, p.own_ids,
-           p.category, p.liked, p.suitable, p.reactions
+           p.category, p.liked, p.suitable, p.reactions, p.diet_tags, p.diet_exclude
     FROM props p
     LEFT JOIN notification_reads r ON r.prop_id = p.id AND r.user_id = %(user_id)s
     -- Записи о кормах — история питания, а не напоминания
@@ -330,3 +332,22 @@ def read_birthdays(user_id: int, tz: str, pet_id: int | None = None) -> int:
             """,
             {"user_id": user_id, "tz": tz, "pet_id": pet_id},
         ).rowcount
+
+
+# ---------- рекомендации ----------
+
+PRODUCT_COLUMNS = "id, kind, name, description, species, age_groups, sizes, tags, ingredients"
+
+
+def find_breed(species: str, breed: str | None) -> dict | None:
+    if not breed:
+        return None
+    with db.pool.connection() as conn:
+        return conn.execute(
+            "SELECT name, size, tags FROM breeds WHERE species = %s AND %s = ANY(names)", (species, breed.strip().lower())
+        ).fetchone()
+
+
+def list_products(kinds: list[str]) -> list[dict]:
+    with db.pool.connection() as conn:
+        return conn.execute(f"SELECT {PRODUCT_COLUMNS} FROM products WHERE kind = ANY(%s) ORDER BY id", (kinds,)).fetchall()

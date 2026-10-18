@@ -13,7 +13,7 @@ def prop_add(prop: PropIn, user_id: int = Depends(current_user_id)):
     try:
         return queries.create_prop(
             user_id, prop.name, prop.msg, prop.text, prop.rep, prop.date, with_owner(prop.own_ids, user_id),
-            prop.category, prop.liked, prop.suitable, prop.reactions,
+            prop.category, prop.liked, prop.suitable, prop.reactions, prop.diet_tags, prop.diet_exclude,
         )
     except queries.InvalidRefs as e:
         bad_request(str(e))
@@ -30,7 +30,7 @@ def prop_edit(prop_id: int, prop: PropIn, user_id: int = Depends(current_user_id
     try:
         updated = queries.update_prop(
             prop_id, user_id, prop.name, prop.msg, prop.text, prop.rep, prop.date, with_owner(prop.own_ids, user_id),
-            prop.category, prop.liked, prop.suitable, prop.reactions,
+            prop.category, prop.liked, prop.suitable, prop.reactions, prop.diet_tags, prop.diet_exclude,
         )
     except queries.InvalidRefs as e:
         bad_request(str(e))

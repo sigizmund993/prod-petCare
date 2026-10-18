@@ -10,6 +10,7 @@ from src import config
 from src.handlers_notification import router as notification_router
 from src.handlers_pet import router as pet_router
 from src.handlers_prop import router as prop_router
+from src.handlers_recommendation import router as recommendation_router
 from src.handlers_user import router as user_router
 
 
@@ -37,3 +38,4 @@ app.include_router(pet_router)
 app.include_router(prop_router)
 app.include_router(photo_router)
 app.include_router(notification_router)
+app.include_router(recommendation_router)
