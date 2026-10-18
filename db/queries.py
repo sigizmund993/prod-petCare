@@ -7,6 +7,9 @@ from db import db
 USER_COLUMNS = "id, email, phone_number, name, email_verified"
 PET_COLUMNS = "id, name, type, breed, birth_date, own_ids, prop_ids, picture IS NOT NULL AS has_picture"
 PROP_COLUMNS = "id, name, msg, text, rep, date, own_ids, category, liked, suitable, reactions"
+COMMUNITY_COLUMNS = "id, name, description, owner_id, member_ids, created_at"
+# Сообщения читаются из m (messages) вместе с именем автора из u (users)
+MESSAGE_COLUMNS = "m.id, m.text, m.community_id, m.from_id, u.name AS from_name, m.created_at, m.edited_at"
 
 
 # ---------- проверки ----------
@@ -118,6 +121,12 @@ def delete_user(user_id: int) -> bool:
                 (orphan_props, orphan_props),
             )
         conn.execute("DELETE FROM pets WHERE own_ids = '{}'")
+        # Сообщества владельца переходят первому из оставшихся участников, опустевшие удаляются
+        conn.execute(
+            "UPDATE communities SET member_ids = array_remove(member_ids, %s) WHERE %s = ANY(member_ids)", (user_id, user_id)
+        )
+        conn.execute("UPDATE communities SET owner_id = member_ids[1] WHERE owner_id IS NULL")
+        conn.execute("DELETE FROM communities WHERE member_ids = '{}'")
         return deleted > 0
 
 
@@ -330,3 +339,134 @@ def read_birthdays(user_id: int, tz: str, pet_id: int | None = None) -> int:
             """,
             {"user_id": user_id, "tz": tz, "pet_id": pet_id},
         ).rowcount
+
+
+# ---------- сообщества ----------
+
+def create_community(user_id: int, name: str, description: str | None) -> dict:
+    with db.pool.connection() as conn:
+        return conn.execute(
+            "INSERT INTO communities (name, description, owner_id, member_ids) "
+            f"VALUES (%s, %s, %s, ARRAY[%s]::bigint[]) RETURNING {COMMUNITY_COLUMNS}",
+            (name, description, user_id, user_id),
+        ).fetchone()
+
+
+def get_community(community_id: int) -> dict | None:
+    with db.pool.connection() as conn:
+        return conn.execute(f"SELECT {COMMUNITY_COLUMNS} FROM communities WHERE id = %s", (community_id,)).fetchone()
+
+
+def list_communities(user_id: int, q: str | None = None, mine: bool = False) -> list[dict]:
+    # q — подстрока названия без учёта регистра, mine — только те, где пользователь участник
+    with db.pool.connection() as conn:
+        return conn.execute(
+            f"SELECT {COMMUNITY_COLUMNS} FROM communities "
+            "WHERE (%(q)s::text IS NULL OR strpos(lower(name), lower(%(q)s)) > 0) "
+            "AND (NOT %(mine)s OR %(user_id)s = ANY(member_ids)) ORDER BY id",
+            {"user_id": user_id, "q": q, "mine": mine},
+        ).fetchall()
+
+
+def update_community(community_id: int, user_id: int, name: str, description: str | None) -> dict | None:
+    # Только владелец; None — сообщества нет или пользователь не владелец
+    with db.pool.connection() as conn:
+        return conn.execute(
+            f"UPDATE communities SET name = %s, description = %s WHERE id = %s AND owner_id = %s RETURNING {COMMUNITY_COLUMNS}",
+            (name, description, community_id, user_id),
+        ).fetchone()
+
+
+def delete_community(community_id: int, user_id: int) -> bool:
+    # Сообщения удаляются каскадом
+    with db.pool.connection() as conn:
+        return conn.execute(
+            "DELETE FROM communities WHERE id = %s AND owner_id = %s", (community_id, user_id)
+        ).rowcount > 0
+
+
+def join_community(community_id: int, user_id: int) -> dict | None:
+    # Повторное вступление ничего не меняет; None — сообщества нет
+    with db.pool.connection() as conn:
+        return conn.execute(
+            "UPDATE communities SET member_ids = CASE WHEN %(user_id)s = ANY(member_ids) THEN member_ids "
+            "ELSE array_append(member_ids, %(user_id)s) END "
+            f"WHERE id = %(id)s RETURNING {COMMUNITY_COLUMNS}",
+            {"id": community_id, "user_id": user_id},
+        ).fetchone()
+
+
+def remove_member(community_id: int, user_id: int) -> None:
+    # Ушедший владелец передаёт сообщество первому из оставшихся участников; опустевшее удаляется
+    with db.pool.connection() as conn:
+        row = conn.execute(
+            "UPDATE communities SET member_ids = array_remove(member_ids, %(user_id)s), "
+            "owner_id = CASE WHEN owner_id = %(user_id)s THEN (array_remove(member_ids, %(user_id)s))[1] ELSE owner_id END "
+            "WHERE id = %(id)s RETURNING member_ids",
+            {"id": community_id, "user_id": user_id},
+        ).fetchone()
+        if row is not None and not row["member_ids"]:
+            conn.execute("DELETE FROM communities WHERE id = %s", (community_id,))
+
+
+def list_members(community_id: int) -> list[dict]:
+    # В порядке вступления
+    with db.pool.connection() as conn:
+        return conn.execute(
+            "SELECT u.id, u.name FROM communities c "
+            "CROSS JOIN unnest(c.member_ids) WITH ORDINALITY AS m (user_id, ord) "
+            "JOIN users u ON u.id = m.user_id WHERE c.id = %s ORDER BY m.ord",
+            (community_id,),
+        ).fetchall()
+
+
+# ---------- сообщения ----------
+
+def create_message(community_id: int, user_id: int, text: str) -> dict:
+    with db.pool.connection() as conn:
+        return conn.execute(
+            "WITH m AS (INSERT INTO messages (text, from_id, community_id) VALUES (%s, %s, %s) RETURNING *) "
+            f"SELECT {MESSAGE_COLUMNS} FROM m LEFT JOIN users u ON u.id = m.from_id",
+            (text, user_id, community_id),
+        ).fetchone()
+
+
+def list_messages(community_id: int, before_id: int | None, after_id: int | None, limit: int) -> list[dict]:
+    # Всегда по возрастанию id. after_id — новые после него (опрос), иначе последние limit до before_id (история)
+    with db.pool.connection() as conn:
+        if after_id is not None:
+            return conn.execute(
+                f"SELECT {MESSAGE_COLUMNS} FROM messages m LEFT JOIN users u ON u.id = m.from_id "
+                "WHERE m.community_id = %s AND m.id > %s ORDER BY m.id LIMIT %s",
+                (community_id, after_id, limit),
+            ).fetchall()
+        rows = conn.execute(
+            f"SELECT {MESSAGE_COLUMNS} FROM messages m LEFT JOIN users u ON u.id = m.from_id "
+            "WHERE m.community_id = %s AND (%s::bigint IS NULL OR m.id < %s) ORDER BY m.id DESC LIMIT %s",
+            (community_id, before_id, before_id, limit),
+        ).fetchall()
+        return rows[::-1]
+
+
+def get_message_access(message_id: int, user_id: int) -> dict | None:
+    # Автор сообщения и владелец сообщества; None — сообщения нет или пользователь не участник
+    with db.pool.connection() as conn:
+        return conn.execute(
+            "SELECT m.from_id, c.owner_id FROM messages m JOIN communities c ON c.id = m.community_id "
+            "WHERE m.id = %s AND %s = ANY(c.member_ids)",
+            (message_id, user_id),
+        ).fetchone()
+
+
+def update_message(message_id: int, user_id: int, text: str) -> dict | None:
+    with db.pool.connection() as conn:
+        return conn.execute(
+            "WITH m AS (UPDATE messages SET text = %s, edited_at = now() WHERE id = %s AND from_id = %s RETURNING *) "
+            f"SELECT {MESSAGE_COLUMNS} FROM m LEFT JOIN users u ON u.id = m.from_id",
+            (text, message_id, user_id),
+        ).fetchone()
+
+
+def delete_message(message_id: int) -> bool:
+    with db.pool.connection() as conn:
+        return conn.execute("DELETE FROM messages WHERE id = %s", (message_id,)).rowcount > 0
