@@ -25,3 +25,8 @@ SMTP_USER = os.getenv("SMTP_USER", "")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 SMTP_FROM = os.getenv("SMTP_FROM") or SMTP_USER
 SMTP_TLS = os.getenv("SMTP_TLS", "starttls")  # starttls | ssl | none
+
+# Telegram. Без TELEGRAM_BOT_TOKEN бот не запускается и уведомления не шлются
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_BOT_USERNAME = os.getenv("TELEGRAM_BOT_USERNAME", "")  # без @
+TELEGRAM_LINK_TTL_MINUTES = int(os.getenv("TELEGRAM_LINK_TTL_MINUTES", "15"))

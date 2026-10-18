@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -6,10 +7,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from db import db
 from db.migrate import migrate
 from db.photo_upload import router as photo_router
-from src import config
+from src import config, telegram
+from src.handlers_community import router as community_router
+from src.handlers_message import router as message_router
 from src.handlers_notification import router as notification_router
 from src.handlers_pet import router as pet_router
 from src.handlers_prop import router as prop_router
+from src.handlers_recommendation import router as recommendation_router
 from src.handlers_user import router as user_router
 
 
@@ -17,7 +21,10 @@ from src.handlers_user import router as user_router
 async def lifespan(app: FastAPI):
     migrate(config.DATABASE_URL)
     db.connect(config.DATABASE_URL)
+    bot = asyncio.create_task(telegram.run()) if config.TELEGRAM_BOT_TOKEN else None
     yield
+    if bot is not None:
+        bot.cancel()
     db.close()
 
 
@@ -37,3 +44,6 @@ app.include_router(pet_router)
 app.include_router(prop_router)
 app.include_router(photo_router)
 app.include_router(notification_router)
+app.include_router(community_router)
+app.include_router(message_router)
+app.include_router(recommendation_router)

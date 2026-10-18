@@ -4,9 +4,12 @@ from psycopg import Connection
 
 from db import db
 
-USER_COLUMNS = "id, email, phone_number, name, email_verified"
+USER_COLUMNS = "id, email, phone_number, name, email_verified, telegram_chat_id IS NOT NULL AS telegram_linked"
 PET_COLUMNS = "id, name, type, breed, birth_date, own_ids, prop_ids, picture IS NOT NULL AS has_picture"
-PROP_COLUMNS = "id, name, msg, text, rep, date, own_ids, category, liked, suitable, reactions"
+PROP_COLUMNS = "id, name, msg, text, rep, date, own_ids, category, liked, suitable, reactions, diet_tags, diet_exclude"
+COMMUNITY_COLUMNS = "id, name, description, owner_id, member_ids, created_at"
+# Сообщения читаются из m (messages) вместе с именем автора из u (users)
+MESSAGE_COLUMNS = "m.id, m.text, m.community_id, m.from_id, u.name AS from_name, m.created_at, m.edited_at"
 
 
 # ---------- проверки ----------
@@ -105,6 +108,46 @@ def mark_email_verified(user_id: int) -> None:
         conn.execute("DELETE FROM email_codes WHERE user_id = %s", (user_id,))
 
 
+# ---------- telegram ----------
+
+def save_telegram_code(user_id: int, code_hash: str, ttl_minutes: int) -> None:
+    # Новая ссылка заменяет старую
+    with db.pool.connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO telegram_link_codes (user_id, code_hash, expires_at)
+            VALUES (%s, %s, now() + make_interval(mins => %s))
+            ON CONFLICT (user_id) DO UPDATE SET code_hash = EXCLUDED.code_hash, expires_at = EXCLUDED.expires_at
+            """,
+            (user_id, code_hash, ttl_minutes),
+        )
+
+
+def link_telegram(code_hash: str, chat_id: int) -> bool:
+    # Код одноразовый; один Telegram — один аккаунт, поэтому со старого аккаунта chat_id снимаем
+    with db.pool.connection() as conn:
+        row = conn.execute(
+            "DELETE FROM telegram_link_codes WHERE code_hash = %s AND expires_at > now() RETURNING user_id", (code_hash,)
+        ).fetchone()
+        if row is None:
+            return False
+        conn.execute("UPDATE users SET telegram_chat_id = NULL WHERE telegram_chat_id = %s", (chat_id,))
+        conn.execute(
+            "UPDATE users SET telegram_chat_id = %s, telegram_linked_at = now() WHERE id = %s", (chat_id, row["user_id"])
+        )
+        return True
+
+
+def unlink_telegram(user_id: int) -> None:
+    with db.pool.connection() as conn:
+        conn.execute("UPDATE users SET telegram_chat_id = NULL WHERE id = %s", (user_id,))
+
+
+def unlink_telegram_chat(chat_id: int) -> None:
+    with db.pool.connection() as conn:
+        conn.execute("UPDATE users SET telegram_chat_id = NULL WHERE telegram_chat_id = %s", (chat_id,))
+
+
 def delete_user(user_id: int) -> bool:
     # Убираем пользователя из владельцев; питомцы и записи без владельцев удаляются
     with db.pool.connection() as conn:
@@ -118,6 +161,12 @@ def delete_user(user_id: int) -> bool:
                 (orphan_props, orphan_props),
             )
         conn.execute("DELETE FROM pets WHERE own_ids = '{}'")
+        # Сообщества владельца переходят первому из оставшихся участников, опустевшие удаляются
+        conn.execute(
+            "UPDATE communities SET member_ids = array_remove(member_ids, %s) WHERE %s = ANY(member_ids)", (user_id, user_id)
+        )
+        conn.execute("UPDATE communities SET owner_id = member_ids[1] WHERE owner_id IS NULL")
+        conn.execute("DELETE FROM communities WHERE member_ids = '{}'")
         return deleted > 0
 
 
@@ -182,13 +231,14 @@ def delete_pet(pet_id: int, user_id: int) -> bool:
 # ---------- props ----------
 
 def create_prop(user_id: int, name: str, msg: str | None, text: str | None, rep: bool, date: datetime, own_ids: list[int],
-                category: str, liked: bool | None, suitable: bool | None, reactions: list[str]) -> dict:
+                category: str, liked: bool | None, suitable: bool | None, reactions: list[str],
+                diet_tags: list[str], diet_exclude: list[str]) -> dict:
     with db.pool.connection() as conn:
         _check_refs(conn, user_id, own_ids)
         return conn.execute(
-            "INSERT INTO props (name, msg, text, rep, date, own_ids, category, liked, suitable, reactions) "
-            f"VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING {PROP_COLUMNS}",
-            (name, msg, text, rep, date, own_ids, category, liked, suitable, reactions),
+            "INSERT INTO props (name, msg, text, rep, date, own_ids, category, liked, suitable, reactions, diet_tags, diet_exclude) "
+            f"VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING {PROP_COLUMNS}",
+            (name, msg, text, rep, date, own_ids, category, liked, suitable, reactions, diet_tags, diet_exclude),
         ).fetchone()
 
 
@@ -231,14 +281,15 @@ def list_props_by_pet(pet_id: int, user_id: int, category: str | None = None, li
 
 
 def update_prop(prop_id: int, user_id: int, name: str, msg: str | None, text: str | None, rep: bool, date: datetime, own_ids: list[int],
-                category: str, liked: bool | None, suitable: bool | None, reactions: list[str]) -> dict | None:
+                category: str, liked: bool | None, suitable: bool | None, reactions: list[str],
+                diet_tags: list[str], diet_exclude: list[str]) -> dict | None:
     with db.pool.connection() as conn:
         _check_refs(conn, user_id, own_ids)
         return conn.execute(
             "UPDATE props SET name = %s, msg = %s, text = %s, rep = %s, date = %s, own_ids = %s, "
-            "category = %s, liked = %s, suitable = %s, reactions = %s "
+            "category = %s, liked = %s, suitable = %s, reactions = %s, diet_tags = %s, diet_exclude = %s "
             f"WHERE id = %s AND %s = ANY(own_ids) RETURNING {PROP_COLUMNS}",
-            (name, msg, text, rep, date, own_ids, category, liked, suitable, reactions, prop_id, user_id),
+            (name, msg, text, rep, date, own_ids, category, liked, suitable, reactions, diet_tags, diet_exclude, prop_id, user_id),
         ).fetchone()
 
 
@@ -264,7 +315,7 @@ _OCCURRENCE = (
 
 _DUE_PROPS = f"""
     SELECT p.id, p.name, p.msg, p.text, p.rep, {_OCCURRENCE} AS date, p.own_ids,
-           p.category, p.liked, p.suitable, p.reactions
+           p.category, p.liked, p.suitable, p.reactions, p.diet_tags, p.diet_exclude
     FROM props p
     LEFT JOIN notification_reads r ON r.prop_id = p.id AND r.user_id = %(user_id)s
     -- Записи о кормах — история питания, а не напоминания
@@ -330,3 +381,211 @@ def read_birthdays(user_id: int, tz: str, pet_id: int | None = None) -> int:
             """,
             {"user_id": user_id, "tz": tz, "pet_id": pet_id},
         ).rowcount
+
+
+# ---------- уведомления в Telegram ----------
+
+# То же, что _DUE_PROPS и _BIRTHDAYS, но сразу по всем пользователям с Telegram. Не шлём то, что уже
+# отправлено или прочитано на сайте, и то, что наступило до привязки (иначе при подключении придёт вся история)
+_TELEGRAM_DUE_PROPS = f"""
+    SELECT u.id AS user_id, u.telegram_chat_id, p.id, p.name, p.msg, p.text, {_OCCURRENCE} AS date
+    FROM props p
+    JOIN users u ON u.id = ANY(p.own_ids) AND u.telegram_chat_id IS NOT NULL
+    LEFT JOIN notification_reads r ON r.prop_id = p.id AND r.user_id = u.id
+    LEFT JOIN telegram_sent s ON s.prop_id = p.id AND s.user_id = u.id
+    WHERE p.date <= now() AND p.category <> 'food' AND {_OCCURRENCE} > u.telegram_linked_at
+      AND (r.read_date IS NULL OR r.read_date < {_OCCURRENCE})
+      AND (s.sent_date IS NULL OR s.sent_date < {_OCCURRENCE})
+"""
+
+_TELEGRAM_BIRTHDAYS = """
+    SELECT u.id AS user_id, u.telegram_chat_id, p.id, p.name, y.years, b.day
+    FROM pets p
+    CROSS JOIN (SELECT (now() AT TIME ZONE %(tz)s)::date AS today) t
+    CROSS JOIN LATERAL (SELECT (extract(year FROM t.today) - extract(year FROM p.birth_date))::int AS years) y
+    CROSS JOIN LATERAL (SELECT (p.birth_date + make_interval(years => y.years))::date AS day) b
+    JOIN users u ON u.id = ANY(p.own_ids) AND u.telegram_chat_id IS NOT NULL
+    LEFT JOIN birthday_reads r ON r.pet_id = p.id AND r.user_id = u.id
+    LEFT JOIN telegram_birthday_sent s ON s.pet_id = p.id AND s.user_id = u.id
+    WHERE y.years >= 1 AND b.day = t.today
+      AND (r.read_date IS NULL OR r.read_date < b.day)
+      AND (s.sent_date IS NULL OR s.sent_date < b.day)
+"""
+
+
+def list_telegram_due_props() -> list[dict]:
+    with db.pool.connection() as conn:
+        return conn.execute(f"{_TELEGRAM_DUE_PROPS} ORDER BY date").fetchall()
+
+
+def list_telegram_birthdays(tz: str) -> list[dict]:
+    with db.pool.connection() as conn:
+        return conn.execute(f"{_TELEGRAM_BIRTHDAYS} ORDER BY p.id", {"tz": tz}).fetchall()
+
+
+def mark_telegram_sent(user_id: int, prop_id: int, sent_date: datetime) -> None:
+    with db.pool.connection() as conn:
+        conn.execute(
+            "INSERT INTO telegram_sent (user_id, prop_id, sent_date) VALUES (%s, %s, %s) "
+            "ON CONFLICT (user_id, prop_id) DO UPDATE SET sent_date = EXCLUDED.sent_date",
+            (user_id, prop_id, sent_date),
+        )
+
+
+def mark_telegram_birthday_sent(user_id: int, pet_id: int, sent_date: date) -> None:
+    with db.pool.connection() as conn:
+        conn.execute(
+            "INSERT INTO telegram_birthday_sent (user_id, pet_id, sent_date) VALUES (%s, %s, %s) "
+            "ON CONFLICT (user_id, pet_id) DO UPDATE SET sent_date = EXCLUDED.sent_date",
+            (user_id, pet_id, sent_date),
+        )
+
+
+# ---------- сообщества ----------
+
+def create_community(user_id: int, name: str, description: str | None) -> dict:
+    with db.pool.connection() as conn:
+        return conn.execute(
+            "INSERT INTO communities (name, description, owner_id, member_ids) "
+            f"VALUES (%s, %s, %s, ARRAY[%s]::bigint[]) RETURNING {COMMUNITY_COLUMNS}",
+            (name, description, user_id, user_id),
+        ).fetchone()
+
+
+def get_community(community_id: int) -> dict | None:
+    with db.pool.connection() as conn:
+        return conn.execute(f"SELECT {COMMUNITY_COLUMNS} FROM communities WHERE id = %s", (community_id,)).fetchone()
+
+
+def list_communities(user_id: int, q: str | None = None, mine: bool = False) -> list[dict]:
+    # q — подстрока названия без учёта регистра, mine — только те, где пользователь участник
+    with db.pool.connection() as conn:
+        return conn.execute(
+            f"SELECT {COMMUNITY_COLUMNS} FROM communities "
+            "WHERE (%(q)s::text IS NULL OR strpos(lower(name), lower(%(q)s)) > 0) "
+            "AND (NOT %(mine)s OR %(user_id)s = ANY(member_ids)) ORDER BY id",
+            {"user_id": user_id, "q": q, "mine": mine},
+        ).fetchall()
+
+
+def update_community(community_id: int, user_id: int, name: str, description: str | None) -> dict | None:
+    # Только владелец; None — сообщества нет или пользователь не владелец
+    with db.pool.connection() as conn:
+        return conn.execute(
+            f"UPDATE communities SET name = %s, description = %s WHERE id = %s AND owner_id = %s RETURNING {COMMUNITY_COLUMNS}",
+            (name, description, community_id, user_id),
+        ).fetchone()
+
+
+def delete_community(community_id: int, user_id: int) -> bool:
+    # Сообщения удаляются каскадом
+    with db.pool.connection() as conn:
+        return conn.execute(
+            "DELETE FROM communities WHERE id = %s AND owner_id = %s", (community_id, user_id)
+        ).rowcount > 0
+
+
+def join_community(community_id: int, user_id: int) -> dict | None:
+    # Повторное вступление ничего не меняет; None — сообщества нет
+    with db.pool.connection() as conn:
+        return conn.execute(
+            "UPDATE communities SET member_ids = CASE WHEN %(user_id)s = ANY(member_ids) THEN member_ids "
+            "ELSE array_append(member_ids, %(user_id)s) END "
+            f"WHERE id = %(id)s RETURNING {COMMUNITY_COLUMNS}",
+            {"id": community_id, "user_id": user_id},
+        ).fetchone()
+
+
+def remove_member(community_id: int, user_id: int) -> None:
+    # Ушедший владелец передаёт сообщество первому из оставшихся участников; опустевшее удаляется
+    with db.pool.connection() as conn:
+        row = conn.execute(
+            "UPDATE communities SET member_ids = array_remove(member_ids, %(user_id)s), "
+            "owner_id = CASE WHEN owner_id = %(user_id)s THEN (array_remove(member_ids, %(user_id)s))[1] ELSE owner_id END "
+            "WHERE id = %(id)s RETURNING member_ids",
+            {"id": community_id, "user_id": user_id},
+        ).fetchone()
+        if row is not None and not row["member_ids"]:
+            conn.execute("DELETE FROM communities WHERE id = %s", (community_id,))
+
+
+def list_members(community_id: int) -> list[dict]:
+    # В порядке вступления
+    with db.pool.connection() as conn:
+        return conn.execute(
+            "SELECT u.id, u.name FROM communities c "
+            "CROSS JOIN unnest(c.member_ids) WITH ORDINALITY AS m (user_id, ord) "
+            "JOIN users u ON u.id = m.user_id WHERE c.id = %s ORDER BY m.ord",
+            (community_id,),
+        ).fetchall()
+
+
+# ---------- сообщения ----------
+
+def create_message(community_id: int, user_id: int, text: str) -> dict:
+    with db.pool.connection() as conn:
+        return conn.execute(
+            "WITH m AS (INSERT INTO messages (text, from_id, community_id) VALUES (%s, %s, %s) RETURNING *) "
+            f"SELECT {MESSAGE_COLUMNS} FROM m LEFT JOIN users u ON u.id = m.from_id",
+            (text, user_id, community_id),
+        ).fetchone()
+
+
+def list_messages(community_id: int, before_id: int | None, after_id: int | None, limit: int) -> list[dict]:
+    # Всегда по возрастанию id. after_id — новые после него (опрос), иначе последние limit до before_id (история)
+    with db.pool.connection() as conn:
+        if after_id is not None:
+            return conn.execute(
+                f"SELECT {MESSAGE_COLUMNS} FROM messages m LEFT JOIN users u ON u.id = m.from_id "
+                "WHERE m.community_id = %s AND m.id > %s ORDER BY m.id LIMIT %s",
+                (community_id, after_id, limit),
+            ).fetchall()
+        rows = conn.execute(
+            f"SELECT {MESSAGE_COLUMNS} FROM messages m LEFT JOIN users u ON u.id = m.from_id "
+            "WHERE m.community_id = %s AND (%s::bigint IS NULL OR m.id < %s) ORDER BY m.id DESC LIMIT %s",
+            (community_id, before_id, before_id, limit),
+        ).fetchall()
+        return rows[::-1]
+
+
+def get_message_access(message_id: int, user_id: int) -> dict | None:
+    # Автор сообщения и владелец сообщества; None — сообщения нет или пользователь не участник
+    with db.pool.connection() as conn:
+        return conn.execute(
+            "SELECT m.from_id, c.owner_id FROM messages m JOIN communities c ON c.id = m.community_id "
+            "WHERE m.id = %s AND %s = ANY(c.member_ids)",
+            (message_id, user_id),
+        ).fetchone()
+
+
+def update_message(message_id: int, user_id: int, text: str) -> dict | None:
+    with db.pool.connection() as conn:
+        return conn.execute(
+            "WITH m AS (UPDATE messages SET text = %s, edited_at = now() WHERE id = %s AND from_id = %s RETURNING *) "
+            f"SELECT {MESSAGE_COLUMNS} FROM m LEFT JOIN users u ON u.id = m.from_id",
+            (text, message_id, user_id),
+        ).fetchone()
+
+
+def delete_message(message_id: int) -> bool:
+    with db.pool.connection() as conn:
+        return conn.execute("DELETE FROM messages WHERE id = %s", (message_id,)).rowcount > 0
+
+
+# ---------- рекомендации ----------
+
+PRODUCT_COLUMNS = "id, kind, name, description, species, age_groups, sizes, tags, ingredients"
+
+
+def find_breed(species: str, breed: str | None) -> dict | None:
+    if not breed:
+        return None
+    with db.pool.connection() as conn:
+        return conn.execute(
+            "SELECT name, size, tags FROM breeds WHERE species = %s AND %s = ANY(names)", (species, breed.strip().lower())
+        ).fetchone()
+
+
+def list_products(kinds: list[str]) -> list[dict]:
+    with db.pool.connection() as conn:
+        return conn.execute(f"SELECT {PRODUCT_COLUMNS} FROM products WHERE kind = ANY(%s) ORDER BY id", (kinds,)).fetchall()

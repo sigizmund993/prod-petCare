@@ -16,6 +16,10 @@ def bad_request(detail: str):
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
 
 
+def forbidden(detail: str):
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
+
+
 def hash_password(password: str) -> str:
     salt = os.urandom(16)
     digest = hashlib.scrypt(password.encode(), salt=salt, n=2**14, r=8, p=1)
@@ -49,3 +53,12 @@ def years_word(n: int) -> str:
     if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
         return "года"
     return "лет"
+
+
+def new_telegram_code() -> str:
+    # Параметр start в ссылке t.me допускает только A-Z a-z 0-9 _ - и до 64 символов
+    return secrets.token_urlsafe(24)
+
+
+def hash_telegram_code(code: str) -> str:
+    return hashlib.sha256(code.encode()).hexdigest()

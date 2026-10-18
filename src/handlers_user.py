@@ -6,9 +6,17 @@ from psycopg.errors import UniqueViolation
 from db import queries
 from src import config
 from src.auth import create_token, current_user_id
-from src.helpers import hash_email_code, hash_password, new_email_code, not_found, verify_password
+from src.helpers import (
+    hash_email_code,
+    hash_password,
+    hash_telegram_code,
+    new_email_code,
+    new_telegram_code,
+    not_found,
+    verify_password,
+)
 from src.mailer import send_mail
-from src.schemas import EmailCodeIn, EmailIn, LoginIn, Token, User, UserIn
+from src.schemas import EmailCodeIn, EmailIn, LoginIn, TelegramLink, Token, User, UserIn
 
 router = APIRouter(prefix="/user", tags=["user"])
 
@@ -97,3 +105,21 @@ def user_edit(user: UserIn, background_tasks: BackgroundTasks, user_id: int = De
 def user_del(user_id: int = Depends(current_user_id)):
     if not queries.delete_user(user_id):
         not_found("User")
+
+
+@router.post("/telegram/link", response_model=TelegramLink)
+def user_telegram_link(user_id: int = Depends(current_user_id)):
+    # Ссылка на бота с одноразовым кодом: по Start бот узнаёт chat_id и привязывает его к аккаунту
+    if not config.TELEGRAM_BOT_TOKEN or not config.TELEGRAM_BOT_USERNAME:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Telegram is not configured")
+    code = new_telegram_code()
+    queries.save_telegram_code(user_id, hash_telegram_code(code), config.TELEGRAM_LINK_TTL_MINUTES)
+    return TelegramLink(
+        url=f"https://t.me/{config.TELEGRAM_BOT_USERNAME}?start={code}",
+        expires_in=config.TELEGRAM_LINK_TTL_MINUTES * 60,
+    )
+
+
+@router.delete("/telegram", status_code=status.HTTP_204_NO_CONTENT)
+def user_telegram_unlink(user_id: int = Depends(current_user_id)):
+    queries.unlink_telegram(user_id)
