@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, BackgroundTasks, Depends, status
 
 from db import queries
+from src import telegram
 from src.auth import current_user_id
 from src.helpers import bad_request, not_found, with_owner
 from src.schemas import Prop, PropIn
@@ -9,13 +10,15 @@ router = APIRouter(prefix="/prop", tags=["prop"])
 
 
 @router.post("/add", response_model=Prop, status_code=status.HTTP_201_CREATED)
-def prop_add(prop: PropIn, user_id: int = Depends(current_user_id)):
+def prop_add(prop: PropIn, background_tasks: BackgroundTasks, user_id: int = Depends(current_user_id)):
     try:
-        return queries.create_prop(
+        created = queries.create_prop(
             user_id, prop.name, prop.msg, prop.text, prop.rep, prop.date, with_owner(prop.own_ids, user_id)
         )
     except queries.InvalidRefs as e:
         bad_request(str(e))
+    background_tasks.add_task(telegram.notify_new_prop, created)
+    return created
 
 
 @router.delete("/del", status_code=status.HTTP_204_NO_CONTENT)

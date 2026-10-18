@@ -28,6 +28,9 @@ services:
       - DATABASE_URL=postgresql://user:password@db:5432/petcare
       - CORS_ORIGIN=${CORS_ORIGIN:-http://localhost}
       - JWT_SECRET=${JWT_SECRET:-dev-secret}
+      # Для разработки заведите отдельного бота: опрашивать один бот может только один процесс
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_BOT_USERNAME=${TELEGRAM_BOT_USERNAME:-}
     volumes:
       - .:/app
     networks:

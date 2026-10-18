@@ -38,6 +38,8 @@ variables:
   SMTP_USER: ""
   SMTP_FROM: ""
   SMTP_TLS: starttls
+  # Telegram-бот для уведомлений. TELEGRAM_BOT_TOKEN — только в Spirit. Без него бот выключен
+  TELEGRAM_BOT_USERNAME: ""
 
 # 1. Сборка образа через Kaniko и публикация в registry.
 # Kaniko собирает последнюю стадию Dockerfile — это prod
@@ -106,6 +108,8 @@ deploy:vm:
       SMTP_PASSWORD=$SMTP_PASSWORD
       SMTP_FROM=$SMTP_FROM
       SMTP_TLS=$SMTP_TLS
+      TELEGRAM_BOT_TOKEN=$TELEGRAM_BOT_TOKEN
+      TELEGRAM_BOT_USERNAME=$TELEGRAM_BOT_USERNAME
       EOF
     # кладём на ВМ compose-файл, миграции, .env и ключ сервис-аккаунта
     - $SSH $VM "mkdir -p ~/app"

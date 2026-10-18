@@ -53,10 +53,11 @@ POST /user/add  ──►  на почту приходит 6-значный к�
   "email": "user@example.com",
   "phone_number": "+79990000000",
   "name": "Иван",
-  "email_verified": true
+  "email_verified": true,
+  "telegram_linked": false
 }
 ```
-`phone_number` может быть `null`.
+`phone_number` может быть `null`. `telegram_linked` — подключены ли уведомления в Telegram.
 
 ### Pet
 ```json
@@ -114,6 +115,8 @@ POST /user/add  ──►  на почту приходит 6-значный к�
 | GET | `/user/me` | да | — | 200 `User` |
 | PUT | `/user/edit` | да | `UserIn` | 200 `User` |
 | DELETE | `/user/del` | да | — | 204 |
+| POST | `/user/telegram/link` | да | — | 200 `{"url", "expires_in"}` |
+| DELETE | `/user/telegram` | да | — | 204 |
 
 `UserIn`:
 ```json
@@ -136,6 +139,16 @@ POST /user/add  ──►  на почту приходит 6-значный к�
 - `/user/verify/resend` всегда отвечает 204, даже если почта не зарегистрирована или уже подтверждена. Показывайте нейтральное «если адрес зарегистрирован, мы отправили код».
 - `/user/verify` на любую проблему с кодом (неверный, просрочен, попытки кончились) отвечает 400 `Wrong or expired code`. Предложите отправить код ещё раз.
 - `DELETE /user/del` убирает пользователя из всех `own_ids`. Питомцы и записи, у которых не осталось владельцев, удаляются.
+
+### Telegram
+
+1. По кнопке «Подключить Telegram» вызовите `POST /user/telegram/link` и откройте `url` в новой вкладке. Ссылка одноразовая и живёт `expires_in` секунд.
+2. Пользователь жмёт Start в боте, и аккаунт привязывается. Обновите `GET /user/me`: `telegram_linked` станет `true`.
+3. `DELETE /user/telegram` отключает уведомления.
+
+Если бот на сервере не настроен, `POST /user/telegram/link` отвечает 503 `Telegram is not configured`.
+
+После `POST /prop/add` всем владельцам записи с подключённым Telegram приходит сообщение с названием, датой, `msg` и `text`.
 
 ### Pet
 

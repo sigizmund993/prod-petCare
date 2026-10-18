@@ -41,3 +41,12 @@ def with_owner(own_ids: list[int], user_id: int) -> list[int]:
     # Текущий пользователь всегда остаётся среди владельцев
     ids = list(dict.fromkeys(own_ids))
     return ids if user_id in ids else [user_id, *ids]
+
+
+def new_telegram_code() -> str:
+    # Параметр start в ссылке t.me допускает только A-Z a-z 0-9 _ - и до 64 символов
+    return secrets.token_urlsafe(24)
+
+
+def hash_telegram_code(code: str) -> str:
+    return hashlib.sha256(code.encode()).hexdigest()

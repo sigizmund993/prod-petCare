@@ -4,7 +4,7 @@ from psycopg import Connection
 
 from db import db
 
-USER_COLUMNS = "id, email, phone_number, name, email_verified"
+USER_COLUMNS = "id, email, phone_number, name, email_verified, telegram_chat_id IS NOT NULL AS telegram_linked"
 PET_COLUMNS = "id, name, type, breed, own_ids, prop_ids"
 PROP_COLUMNS = "id, name, msg, text, rep, date, own_ids"
 
@@ -103,6 +103,52 @@ def mark_email_verified(user_id: int) -> None:
     with db.pool.connection() as conn:
         conn.execute("UPDATE users SET email_verified = TRUE WHERE id = %s", (user_id,))
         conn.execute("DELETE FROM email_codes WHERE user_id = %s", (user_id,))
+
+
+# ---------- telegram ----------
+
+def save_telegram_code(user_id: int, code_hash: str, ttl_minutes: int) -> None:
+    # Новая ссылка заменяет старую
+    with db.pool.connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO telegram_link_codes (user_id, code_hash, expires_at)
+            VALUES (%s, %s, now() + make_interval(mins => %s))
+            ON CONFLICT (user_id) DO UPDATE SET code_hash = EXCLUDED.code_hash, expires_at = EXCLUDED.expires_at
+            """,
+            (user_id, code_hash, ttl_minutes),
+        )
+
+
+def link_telegram(code_hash: str, chat_id: int) -> bool:
+    # Код одноразовый; один Telegram — один аккаунт, поэтому со старого аккаунта chat_id снимаем
+    with db.pool.connection() as conn:
+        row = conn.execute(
+            "DELETE FROM telegram_link_codes WHERE code_hash = %s AND expires_at > now() RETURNING user_id", (code_hash,)
+        ).fetchone()
+        if row is None:
+            return False
+        conn.execute("UPDATE users SET telegram_chat_id = NULL WHERE telegram_chat_id = %s", (chat_id,))
+        conn.execute("UPDATE users SET telegram_chat_id = %s WHERE id = %s", (chat_id, row["user_id"]))
+        return True
+
+
+def unlink_telegram(user_id: int) -> None:
+    with db.pool.connection() as conn:
+        conn.execute("UPDATE users SET telegram_chat_id = NULL WHERE id = %s", (user_id,))
+
+
+def unlink_telegram_chat(chat_id: int) -> None:
+    with db.pool.connection() as conn:
+        conn.execute("UPDATE users SET telegram_chat_id = NULL WHERE telegram_chat_id = %s", (chat_id,))
+
+
+def get_telegram_chats(user_ids: list[int]) -> list[int]:
+    with db.pool.connection() as conn:
+        rows = conn.execute(
+            "SELECT telegram_chat_id FROM users WHERE id = ANY(%s) AND telegram_chat_id IS NOT NULL", (user_ids,)
+        ).fetchall()
+        return [r["telegram_chat_id"] for r in rows]
 
 
 def delete_user(user_id: int) -> bool:

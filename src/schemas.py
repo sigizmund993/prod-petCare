@@ -22,6 +22,7 @@ class User(BaseModel):
     phone_number: str | None
     name: str
     email_verified: bool
+    telegram_linked: bool
 
 
 class LoginIn(BaseModel):
@@ -41,6 +42,11 @@ class EmailCodeIn(BaseModel):
 class Token(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
+
+class TelegramLink(BaseModel):
+    url: str
+    expires_in: int  # секунд
 
 
 class PetIn(BaseModel):
