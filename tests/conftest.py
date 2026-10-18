@@ -10,6 +10,9 @@ if not TEST_DATABASE_URL:
     pytest.exit("Задайте TEST_DATABASE_URL — отдельную БД для тестов (её схема будет пересоздана)", returncode=2)
 os.environ["DATABASE_URL"] = TEST_DATABASE_URL
 os.environ.setdefault("JWT_SECRET", "test-secret-that-is-long-enough-for-hs256")
+# CI-переменные Spirit попадают и в тесты: с настоящим токеном приложение запустило бы бота
+os.environ["TELEGRAM_BOT_TOKEN"] = ""
+os.environ["TELEGRAM_BOT_USERNAME"] = ""
 
 from fastapi.testclient import TestClient
 
